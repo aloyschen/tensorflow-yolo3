@@ -1,0 +1,27 @@
+.Dstore
+**/*.iml
+.idea/
+*.project
+/target/
+**/*.swp
+*.classpath
+*.vscode
+.settings/
+.classpath
+.project
+.idea
+/ __pycache__
+**/*.pyc
+/logs/
+/lib/
+/spark-warehouse/
+/data/
+/result/
+/gt/
+live_hot_statistic.py
+/Kaggle/fashion-minist/data/*
+/ConvolutionalPoseMachine/dataset/*
+/VideoClassification/data/*
+/lstm_coinbase/data/price.csv
+/data/*
+/annotations/*

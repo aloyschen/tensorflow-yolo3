@@ -92,13 +92,13 @@ class yolo:
             momentum = norm_decay, epsilon = norm_epsilon, center = True,
             beta_initializer = offset, gamma_initializer = scale,
             moving_mean_initializer = mean, moving_variance_initializer = variance,
-            scale = True, training = training, fused = True)
+            scale = True, training = training)
         else:
             bn_layer = tf.layers.batch_normalization(
             inputs = input_layer, axis = 3,
             momentum = norm_decay, epsilon = norm_epsilon, center = True,
-            scale = True, training = training, fused = True)
-        return tf.nn.leaky_relu(bn_layer)
+            scale = True, training = training)
+        return tf.nn.leaky_relu(bn_layer, alpha = 0.1)
 
 
     def _conv2d_layer(self, inputs, filters_num, kernel_size, name, weights_dict = None, strides = 1):
@@ -367,69 +367,6 @@ class yolo:
         return boxes, boxes_scores
 
 
-    def Preprocess_true_boxes(self, true_boxes, input_shape, anchors, num_classes):
-        """
-        Introduction
-        ------------
-            对训练数据的ground truth box进行预处理
-        Parameters
-        ----------
-            true_boxes: ground truth box 形状为[batch, boxes, 5], x_min, y_min, x_max, y_max, class_id
-            input_shape: 输入训练图像的长宽
-            anchors: 根据数据集box聚类得到的长宽，形状为[9，2]
-            num_classes: 类别数量
-        """
-        num_layers = len(anchors) // 3
-        anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]] if num_layers == 3 else [[3, 4, 5], [1, 2, 3]]
-        true_boxes = np.array(true_boxes, dtype='float32')
-        input_shape = np.array(input_shape, dtype='int32')
-        boxes_xy = (true_boxes[..., 0:2] + true_boxes[..., 2:4]) // 2
-        boxes_wh = true_boxes[..., 2:4] - true_boxes[..., 0:2]
-        true_boxes[..., 0:2] = boxes_xy / input_shape[::-1]
-        true_boxes[..., 2:4] = boxes_wh / input_shape[::-1]
-
-        batch_image_num = true_boxes.shape[0]
-        grid_shapes = [input_shape // 32, input_shape // 16, input_shape // 8]
-        y_true = [np.zeros((batch_image_num, grid_shapes[l][0], grid_shapes[l][1], len(anchor_mask[l]), 5 + num_classes), dtype = 'float32') for l in range(num_layers)]
-        # 这里扩充维度是为了后面应用广播计算每个图中所有box的anchor互相之间的iou
-        anchors = np.expand_dims(anchors, 0)
-        anchors_max = anchors / 2.
-        anchors_min = -anchors_max
-        valid_mask = boxes_wh[..., 0] > 0
-
-        for b in range(batch_image_num):
-            # 去除全零行数据
-            wh = boxes_wh[b, valid_mask[b]]
-            if len(wh) == 0: continue
-            # 为了应用广播扩充维度
-            wh = np.expand_dims(wh, -2)
-            # wh 的shape为[box_num, 1, 2]
-            boxes_max = wh / 2.
-            boxes_min = -boxes_max
-
-            intersect_min = np.maximum(boxes_min, anchors_min)
-            intersect_max = np.minimum(boxes_max, anchors_max)
-            intersect_wh = np.maximum(intersect_max - intersect_min, 0.)
-            intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
-            box_area = wh[..., 0] * wh[..., 1]
-            anchor_area = anchors[..., 0] * anchors[..., 1]
-            iou = intersect_area / (box_area + anchor_area - intersect_area)
-
-            #找出和ground truth box的iou最大的anchor box, 然后将对应不同比例的负责该ground turth box 的位置置为ground truth box坐标
-            best_anchor = np.argmax(iou, axis = -1)
-            for t, n in enumerate(best_anchor):
-                for l in range(num_layers):
-                    if n in anchor_mask[l]:
-                        i = np.floor(true_boxes[b, t, 0] * grid_shapes[l][1]).astype('int32')
-                        j = np.floor(true_boxes[b, t, 1] * grid_shapes[l][0]).astype('int32')
-                        k = anchor_mask[l].index(n)
-                        c = true_boxes[b, t, 4].astype('int32')
-                        y_true[l][b, j, i, k, 0:4] = true_boxes[b, t, 0:4]
-                        y_true[l][b, j, i, k, 4] = 1
-                        y_true[l][b, j, i, k, 5 + c] = 1
-        return y_true
-
-
     def box_iou(self, box1, box2):
         """
         Introduction
@@ -492,7 +429,7 @@ class yolo:
             object_mask = y_true[index][..., 4:5]
             class_probs = y_true[index][..., 5:]
             grid, predictions, pred_xy, pred_wh = self.yolo_head(yolo_output[index], anchors[anchor_mask[index]], num_classes, input_shape, training = True)
-            # pred_box的shape为[batch
+            # pred_box的shape为[batch, box_num, 4]
             pred_box = tf.concat([pred_xy, pred_wh], axis = -1)
 
             raw_true_xy = y_true[index][..., :2] * grid_shapes[index][::-1] - grid
@@ -501,10 +438,10 @@ class yolo:
             # 该系数是用来调整box坐标loss的系数
             box_loss_scale = 2 - y_true[index][..., 2:3] * y_true[index][..., 3:4]
             ignore_mask = tf.TensorArray(dtype = tf.float32, size = 1, dynamic_size = True)
-            object_mask_bool = tf.cast(object_mask, dtype=tf.bool)
+            object_mask_bool = tf.cast(object_mask, dtype = tf.bool)
             def loop_body(internal_index, ignore_mask):
                 # true_box的shape为[box_num, 4]
-                true_box = tf.boolean_mask(y_true[index][internal_index, ..., 0:4], object_mask_bool[internal_index])
+                true_box = tf.boolean_mask(y_true[index][internal_index, ..., 0:4], object_mask_bool[internal_index, ..., 0])
                 iou = self.box_iou(pred_box[internal_index], true_box)
                 # 计算每个true_box对应的预测的iou最大的box
                 best_iou = tf.reduce_max(iou, axis = -1)
@@ -524,4 +461,5 @@ class yolo:
             confidence_loss = tf.reduce_sum(confidence_loss) / tf.cast(tf.shape(yolo_output[0])[0], tf.float32)
             class_loss = tf.reduce_sum(class_loss) / tf.cast(tf.shape(yolo_output[0])[0], tf.float32)
             loss += xy_loss + wh_loss + confidence_loss + class_loss
+            # loss += xy_loss + wh_loss + class_loss
         return loss

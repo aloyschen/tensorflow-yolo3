@@ -1,5 +1,4 @@
 import numpy as np
-from pycocotools.coco import COCO
 import matplotlib.pyplot as plt
 
 
@@ -177,35 +176,15 @@ def process(dataFile, cluster_num, iteration_cutoff = 25, function = np.median):
     anchors = Kmeans(boxes, cluster_num, iteration_cutoff, function)
     plt.scatter(anchors[:,0], anchors[:, 1], c = 'b')
     plt.show()
-    # for _ in range(100):
-    #     anchors, best_iou = Kmeans(boxes, cluster_num, iteration_cutoff, function)
-    #     if best_iou > last_best_iou:
-    #         last_anchors = anchors
-    #         last_best_iou = best_iou
-    #         print("anchors: {}, avg iou: {}".format(last_anchors, last_best_iou))
-    # print("final anchors: {}, avg iou: {}".format(last_anchors, last_best_iou))
+    for _ in range(100):
+        anchors, best_iou = Kmeans(boxes, cluster_num, iteration_cutoff, function)
+        if best_iou > last_best_iou:
+            last_anchors = anchors
+            last_best_iou = best_iou
+            print("anchors: {}, avg iou: {}".format(last_anchors, last_best_iou))
+    print("final anchors: {}, avg iou: {}".format(last_anchors, last_best_iou))
 
-def removeDuplicates(nums):
-    """
-    :type nums: List[int]
-    :rtype: int
-    """
-    results = []
-    for num in nums:
-        have = False
-        if len(results) == 0:
-            results.append(num)
-        else:
-            print(results)
-            for result in results:
-                if num == result:
-                    have = True
-            if have == True:
-                nums.remove(num)
-            else:
-                results.append(num)
-    return len(nums)
+
 
 if __name__ == '__main__':
-    # process('./annotations/instances_train2014.json', 9)
-    removeDuplicates([0,0,1,1,1,2,2,3,3,4])
+    process('./annotations/instances_train2014.json', 9)

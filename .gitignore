@@ -25,3 +25,5 @@ live_hot_statistic.py
 /lstm_coinbase/data/price.csv
 /data/*
 /annotations/*
+./model.tar
+/test_model/*

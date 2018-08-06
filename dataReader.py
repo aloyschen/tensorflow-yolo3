@@ -1,9 +1,11 @@
 import os
 import config
 import json
+import colorsys
 import tensorflow as tf
 import numpy as np
 from collections import defaultdict
+from PIL import Image, ImageDraw
 
 
 
@@ -44,7 +46,7 @@ class Reader:
         self.num_classes = num_classes
         self.TfrecordFile = os.path.join(self.data_dir, self.mode + '.tfrecords')
         if not os.path.exists(self.TfrecordFile):
-          self.convert_to_tfrecord(self.data_dir)
+            self.convert_to_tfrecord(self.data_dir)
 
 
     def Preprocess_true_boxes(self, true_boxes):
@@ -54,16 +56,16 @@ class Reader:
             对训练数据的ground truth box进行预处理
         Parameters
         ----------
-            true_boxes: ground truth box 形状为[batch, boxes, 5], x_min, y_min, x_max, y_max, class_id
+            true_boxes: ground truth box 形状为[boxes, 5], x_min, y_min, x_max, y_max, class_id
             input_shape: 输入训练图像的长宽
             anchors: 根据数据集box聚类得到的长宽，形状为[9，2]
             num_classes: 类别数量
         """
         num_layers = self.anchors.shape[0] // 3
-        anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]] if num_layers == 3 else [[3, 4, 5], [1, 2, 3]]
+        anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
         true_boxes = np.array(true_boxes, dtype='float32')
         input_shape = np.array([self.input_shape, self.input_shape], dtype='int32')
-        boxes_xy = (true_boxes[..., 0:2] + true_boxes[..., 2:4]) // 2
+        boxes_xy = (true_boxes[..., 0:2] + true_boxes[..., 2:4]) / 2.
         boxes_wh = true_boxes[..., 2:4] - true_boxes[..., 0:2]
         true_boxes[..., 0:2] = boxes_xy / input_shape[::-1]
         true_boxes[..., 2:4] = boxes_wh / input_shape[::-1]
@@ -93,7 +95,7 @@ class Reader:
         iou = intersect_area / (box_area + anchor_area - intersect_area)
 
         # 找出和ground truth box的iou最大的anchor box, 然后将对应不同比例的负责该ground turth box 的位置置为ground truth box坐标
-        best_anchor = np.argmax(iou, axis=-1)
+        best_anchor = np.argmax(iou, axis = -1)
         for t, n in enumerate(best_anchor):
             for l in range(num_layers):
                 if n in anchor_mask[l]:
@@ -102,9 +104,10 @@ class Reader:
                     k = anchor_mask[l].index(n)
                     c = true_boxes[t, 4].astype('int32')
                     y_true[l][j, i, k, 0:4] = true_boxes[t, 0:4]
-                    y_true[l][j, i, k, 4] = 1
-                    y_true[l][j, i, k, 5 + c] = 1
+                    y_true[l][j, i, k, 4] = 1.
+                    y_true[l][j, i, k, 5 + c] = 1.
         return y_true[0], y_true[1], y_true[2]
+
 
     def _get_anchors(self):
         """
@@ -261,26 +264,23 @@ class Reader:
             image: tensorflow解析的图片
             bbox: 图片中对应的box坐标
         """
-        image_width, image_high = tf.shape(image)[1], tf.shape(image)[0]
+        image_width, image_high = tf.cast(tf.shape(image)[1], tf.float32), tf.cast(tf.shape(image)[0], tf.float32)
         input_width = tf.cast(self.input_shape, tf.float32)
         input_high = tf.cast(self.input_shape, tf.float32)
-        image_high = tf.cast(image_high, tf.float32)
-        image_width = tf.cast(image_width, tf.float32)
         if self.mode == 'train':
             # 随机长宽比
             new_aspect_ratio = tf.random_uniform([], dtype = tf.float32, minval = 1 - self.jitter, maxval = 1 + self.jitter)
             # 图片随机缩放比例
             scale = tf.random_uniform([], dtype = tf.float32, minval = .25, maxval = 2)
             new_high, new_width = tf.cond(tf.less(new_aspect_ratio, 1), lambda : (scale * input_high, scale * input_high * new_aspect_ratio), lambda : (scale * input_width / new_aspect_ratio, scale * input_width))
-            image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)], align_corners = True)
-
+            image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
             # 将图片按照固定长宽比缩放到416*416
             new_high = new_high * tf.minimum(input_width / new_width, input_high / new_high)
-            new_width = new_high * tf.minimum(input_width / new_width, input_high / new_high)
-            dx = tf.cond(tf.greater(input_width - tf.cast(new_width, tf.float32), 0), lambda: tf.divide(tf.subtract(input_width, tf.cast(new_width, tf.float32)), 2.), lambda: 0.)
-            dy = tf.cond(tf.greater(input_high - tf.cast(new_high, tf.float32), 0), lambda: tf.divide(tf.subtract(input_high, tf.cast(new_high, tf.float32)), 2.),lambda: 0.)
+            new_width =new_high * tf.minimum(input_width / new_width, input_high / new_high)
+            dx = tf.cond(tf.greater(input_width - new_width, 0), lambda: tf.divide(tf.subtract(input_width, new_width), 2), lambda: 0.)
+            dy = tf.cond(tf.greater(input_high - new_high, 0), lambda: tf.divide(tf.subtract(input_high, new_high), 2), lambda: 0.)
             image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
-            image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width,tf.int32))
+            image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
 
             # 随机左右翻转图片
             flip_left_right = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
@@ -290,42 +290,42 @@ class Reader:
             flip_up_down = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
             image = tf.cond(flip_up_down, lambda : tf.image.flip_up_down(image), lambda : image)
 
-            # 随机调整颜色
-            delta = tf.random_uniform([], dtype = tf.float32, minval = -self.hue, maxval = self.hue)
-            image = tf.image.adjust_hue(image / 255, delta) * 255
-            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-
-            # 随机调整饱和度
-            saturation_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.sat)
-            image = tf.image.adjust_saturation(image / 255, saturation_factor) * 255
-            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-
-            # 随机调整对比度
-            contrast_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.cont)
-            image = tf.image.adjust_contrast(image / 255, contrast_factor) * 255
-            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-
-            # 随机调整亮度
-            bright_factor = tf.random_uniform([], dtype = tf.float32, minval = -self.bri, maxval = self.bri)
-            image = tf.image.adjust_brightness(image / 255, bright_factor) * 255
-            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+            # # 随机调整颜色
+            # delta = tf.random_uniform([], dtype = tf.float32, minval = -self.hue, maxval = self.hue)
+            # image = tf.image.adjust_hue(image / 255., delta) * 255.
+            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+            #
+            # # 随机调整饱和度
+            # saturation_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.sat)
+            # image = tf.image.adjust_saturation(image / 255., saturation_factor) * 255.
+            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+            #
+            # # 随机调整对比度
+            # contrast_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.cont)
+            # image = tf.image.adjust_contrast(image / 255., contrast_factor) * 255.
+            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+            #
+            # # 随机调整亮度
+            # bright_factor = tf.random_uniform([], dtype = tf.float32, minval = -self.bri, maxval = self.bri)
+            # image = tf.image.adjust_brightness(image / 255., bright_factor) * 255.
+            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
 
             def _flip_left_right_boxes(boxes):
-                xmin, ymin, xmax, ymax, label = tf.split(value=boxes, num_or_size_splits=5, axis=1)
+                xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis=1)
                 flipped_xmin = tf.subtract(input_width, xmax)
                 flipped_xmax = tf.subtract(input_width, xmin)
                 flipped_boxes = tf.concat([flipped_xmin, ymin, flipped_xmax, ymax, label], 1)
                 return flipped_boxes
 
             def _flip_up_down_boxes(boxes):
-                xmin, ymin, xmax, ymax, label = tf.split(value=boxes, num_or_size_splits=5, axis=1)
+                xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis=1)
                 flipped_ymin = tf.subtract(input_high, ymax)
                 flipped_ymax = tf.subtract(input_high, ymin)
                 flipped_boxes = tf.concat([xmin, flipped_ymin, xmax, flipped_ymax, label], 1)
                 return flipped_boxes
 
             def _resize_boxes(boxes):
-                xmin, ymin, xmax, ymax, label = tf.split(value=boxes,num_or_size_splits=5, axis=1)
+                xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis = 1)
                 xmin = xmin * new_width / image_width + dx
                 xmax = xmax * new_width / image_width + dx
                 ymin = ymin * new_high / image_high + dy
@@ -344,7 +344,7 @@ class Reader:
             dy = tf.divide(tf.subtract(input_high, new_high), 2)
             image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
             image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
-            xmin, ymin, xmax, ymax, label = tf.split(value=bbox, num_or_size_splits=5, axis=1)
+            xmin, ymin, xmax, ymax, label = tf.split(value = bbox, num_or_size_splits = 5, axis = 1)
             xmin = xmin * new_width / image_width + dx
             xmax = xmax * new_width / image_width + dx
             ymin = ymin * new_high / image_high + dy
@@ -398,10 +398,7 @@ class Reader:
         ----------
             batch_size: batch的大小
         """
-        if self.mode == 'train':
-            filename_queue = tf.train.string_input_producer([self.TfrecordFile], shuffle = True)
-        else:
-            filename_queue = tf.train.string_input_producer([self.TfrecordFile], shuffle = False)
+        filename_queue = tf.train.string_input_producer([self.TfrecordFile])
         reader = tf.TFRecordReader()
         _, serialized_example = reader.read(filename_queue)
         image, bbox_true_13, bbox_true_26, bbox_true_52 = self.parser(serialized_example)
@@ -410,5 +407,62 @@ class Reader:
         bbox_true_13.set_shape([grid_shapes[0], grid_shapes[0], 3, 5 + self.num_classes])
         bbox_true_26.set_shape([grid_shapes[1], grid_shapes[1], 3, 5 + self.num_classes])
         bbox_true_52.set_shape([grid_shapes[2], grid_shapes[2], 3, 5 + self.num_classes])
-        images, bboxes_true_13, bboxes_true_26, bboxes_true_52 = tf.train.batch([image, bbox_true_13, bbox_true_26, bbox_true_52], batch_size = batch_size, capacity = 20 * batch_size, num_threads = 10)
+        images, bboxes_true_13, bboxes_true_26, bboxes_true_52 = tf.train.shuffle_batch([image, bbox_true_13, bbox_true_26, bbox_true_52], batch_size = batch_size, capacity = 20 * batch_size, num_threads = 10, min_after_dequeue = 10 * batch_size)
         return images, bboxes_true_13, bboxes_true_26, bboxes_true_52
+
+def draw_boxes(image_data, box, class_names):
+    image = Image.fromarray((image_data).astype('uint8'), 'RGB')
+    hsv_tuples = [(x / len(class_names), 1., 1.)
+                      for x in range(len(class_names))]
+    colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
+    colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
+    np.random.seed(10101)  # Fixed seed for consistent colors across runs.
+    np.random.shuffle(colors)  # Shuffle colors to decorrelate adjacent classes.
+    np.random.seed(None)  # Reset seed to default.
+    thickness = (image.size[0] + image.size[1]) // 300
+    for index in range(box.shape[0]):
+
+        predicted_class = class_names[int(box[index][4])]
+        label = '{}'.format(predicted_class)
+        draw = ImageDraw.Draw(image)
+        label_size = draw.textsize(label)
+        left, top, right, bottom, _ = box[index]
+        top = max(0, np.floor(top + 0.5).astype('int32'))
+        left = max(0, np.floor(left + 0.5).astype('int32'))
+        bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+        right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+        if top ==0 and left == 0 and right == 0 and bottom == 0:
+            continue
+        if top - label_size[1] >= 0:
+            text_origin = np.array([left, top - label_size[1]])
+        else:
+            text_origin = np.array([left, top + 1])
+
+        # My kingdom for a good redistributable image drawing library.
+        for i in range(thickness):
+            draw.rectangle(
+                [left + i, top + i, right - i, bottom - i],
+                outline=colors[int(box[index][4])])
+        draw.rectangle(
+            [tuple(text_origin), tuple(text_origin + label_size)],
+            fill=colors[int(box[index][4])])
+        print(label)
+        text_origin = text_origin.astype(np.int32)
+        draw.text(list(text_origin), label, fill=(0, 0, 0))
+    return image
+
+def _get_class(classes_path):
+    """
+    Introduction
+    ------------
+        获取类别名字
+    Returns
+    -------
+        class_names: coco数据集类别对应的名字
+    """
+    classes_path = os.path.expanduser(classes_path)
+    with open(classes_path) as f:
+        class_names = f.readlines()
+    class_names = [c.strip() for c in class_names]
+    return class_names
+

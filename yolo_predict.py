@@ -108,7 +108,7 @@ class yolo_predictor:
         boxes_ = tf.concat(boxes_, axis = 0)
         scores_ = tf.concat(scores_, axis = 0)
         classes_ = tf.concat(classes_, axis = 0)
-        return boxes_, scores_, classes_
+        return boxes_, scores_, classes_, box_scores
 
 
     def boxes_and_scores(self, feats, anchors, classes_num, input_shape, image_shape):
@@ -190,25 +190,22 @@ class yolo_predictor:
             box_xy, box_wh, box_confidence, box_class_probs
         """
         num_anchors = len(anchors)
-        anchors_tensor = tf.reshape(tf.constant(anchors, dtype = tf.float32), [1, 1, 1, num_anchors, 2])
-
-        grid_shape = tf.shape(feats)[1:3]
-        grid_y = tf.tile(tf.reshape(tf.range(0, limit = grid_shape[0]), [-1, 1, 1, 1]), [1, grid_shape[1], 1, 1])
-        grid_x = tf.tile(tf.reshape(tf.range(0, limit = grid_shape[1]), [1, -1, 1, 1]), [grid_shape[0], 1, 1, 1])
-        grid = tf.concat([grid_x, grid_y], axis = -1)
-        grid = tf.cast(grid, dtype = tf.float32)
-
-        feats = tf.reshape(feats, [-1, grid_shape[0], grid_shape[1], num_anchors, num_classes + 5])
-
-        box_xy = tf.sigmoid(feats[..., :2])
-        box_wh = tf.exp(feats[..., 2:4])
-        box_confidence = tf.sigmoid(feats[..., 4:5])
-        box_class_probs = tf.sigmoid(feats[..., 5:])
-
-        box_xy = (box_xy + grid) / tf.cast(grid_shape[::-1], dtype = tf.float32)
-        box_wh = box_wh * anchors_tensor / tf.cast(input_shape[::-1], dtype = tf.float32)
-
+        anchors_tensor = tf.reshape(tf.constant(anchors, dtype=tf.float32), [1, 1, 1, num_anchors, 2])
+        grid_size = tf.shape(feats)[1:3]
+        predictions = tf.reshape(feats, [-1, grid_size[0], grid_size[1], num_anchors, num_classes + 5])
+        # 这里构建13*13*1*2的矩阵，对应每个格子加上对应的坐标
+        grid_y = tf.tile(tf.reshape(tf.range(grid_size[0]), [-1, 1, 1, 1]), [1, grid_size[1], 1, 1])
+        grid_x = tf.tile(tf.reshape(tf.range(grid_size[1]), [1, -1, 1, 1]), [grid_size[0], 1, 1, 1])
+        grid = tf.concat([grid_x, grid_y], axis=-1)
+        grid = tf.cast(grid, tf.float32)
+        # 将x,y坐标归一化为占416的比例
+        box_xy = (tf.sigmoid(predictions[..., :2]) + grid) / tf.cast(grid_size[::-1], tf.float32)
+        # 将w,h也归一化为占416的比例
+        box_wh = tf.exp(predictions[..., 2:4]) * anchors_tensor / tf.cast(input_shape[::-1], tf.float32)
+        box_confidence = tf.sigmoid(predictions[..., 4:5])
+        box_class_probs = tf.sigmoid(predictions[..., 5:])
         return box_xy, box_wh, box_confidence, box_class_probs
+
 
     def predict(self, inputs, image_shape):
         """
@@ -225,7 +222,7 @@ class yolo_predictor:
             scores: 物体概率值
             classes: 物体类别
         """
-        model = yolo(config.norm_epsilon, config.norm_decay, self.anchors_path, self.classes_path, pre_train = False)
+        model = yolo(config.norm_epsilon, config.norm_decay, self.anchors_path, self.classes_path, pre_train = True)
         output = model.yolo_inference(inputs, config.num_anchors // 3, config.num_classes, training = False)
-        boxes, scores, classes = self.eval(output, image_shape, max_boxes = 20)
-        return boxes, scores, classes
+        boxes, scores, classes, box_scores  = self.eval(output, image_shape, max_boxes = 20)
+        return boxes, scores, classes, output

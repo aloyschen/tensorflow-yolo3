@@ -25,7 +25,7 @@ def letterbox_image(image, size):
     new_h = int(image_h * min(w*1.0/image_w, h*1.0/image_h))
     resized_image = image.resize((new_w,new_h), Image.BICUBIC)
 
-    boxed_image = Image.new('RGB', size, (128,128,128))
+    boxed_image = Image.new('RGB', size, (0, 0, 0))
     boxed_image.paste(resized_image, ((w-new_w)//2,(h-new_h)//2))
     return boxed_image
 
@@ -46,21 +46,23 @@ def detect(model_path, image_path):
     image_data = np.array(resize_image, dtype = np.float32)
     image_data /= 255.
     image_data = np.expand_dims(image_data, axis = 0)
-    input_image_shape = tf.placeholder(dtype=tf.int32, shape=(2,))
-    input_image = tf.placeholder(shape=[None, 416, 416, 3], dtype=tf.float32)
+    input_image_shape = tf.placeholder(dtype = tf.int32, shape = (2,))
+    input_image = tf.placeholder(shape = [None, 416, 416, 3], dtype = tf.float32)
     predictor = yolo_predictor(config.obj_threshold, config.nms_threshold, config.classes_path, config.anchors_path)
-    boxes, scores, classes = predictor.predict(input_image, input_image_shape)
+    boxes, scores, classes, box_scores = predictor.predict(input_image, input_image_shape)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         #加载训练好的模型
         saver = tf.train.Saver()
-        saver.restore(sess, model_path + '/model.ckpt')
-        out_boxes, out_scores, out_classes = sess.run(
-            [boxes, scores, classes],
+        saver.restore(sess, model_path + '/model.ckpt-1')
+        out_boxes, out_scores, out_classes, output_value  = sess.run(
+            [boxes, scores, classes, box_scores],
             feed_dict={
                 input_image: image_data,
                 input_image_shape: [image.size[1], image.size[0]]
             })
+        print(output_value[1].shape)
+        print('pred value', output_value[0][..., 5:])
         print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
         font = ImageFont.truetype(font = 'font/FiraMono-Medium.otf', size = np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
@@ -99,4 +101,4 @@ def detect(model_path, image_path):
         image.show()
         image.save('./result.jpg')
 if __name__ == '__main__':
-    detect('./test_model', './test.jpg')
+    detect('./test_model', '../keras-yolo3/test.jpg')

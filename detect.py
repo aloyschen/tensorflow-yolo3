@@ -49,20 +49,18 @@ def detect(model_path, image_path):
     input_image_shape = tf.placeholder(dtype = tf.int32, shape = (2,))
     input_image = tf.placeholder(shape = [None, 416, 416, 3], dtype = tf.float32)
     predictor = yolo_predictor(config.obj_threshold, config.nms_threshold, config.classes_path, config.anchors_path)
-    boxes, scores, classes, box_scores = predictor.predict(input_image, input_image_shape)
+    boxes, scores, classes = predictor.predict(input_image, input_image_shape)
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         #加载训练好的模型
         saver = tf.train.Saver()
-        saver.restore(sess, model_path + '/model.ckpt-1')
-        out_boxes, out_scores, out_classes, output_value  = sess.run(
-            [boxes, scores, classes, box_scores],
+        saver.restore(sess, model_path + '/model.ckpt-0')
+        out_boxes, out_scores, out_classes = sess.run(
+            [boxes, scores, classes],
             feed_dict={
                 input_image: image_data,
                 input_image_shape: [image.size[1], image.size[0]]
             })
-        print(output_value[1].shape)
-        print('pred value', output_value[0][..., 5:])
         print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
         font = ImageFont.truetype(font = 'font/FiraMono-Medium.otf', size = np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300

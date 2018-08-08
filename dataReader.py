@@ -6,7 +6,7 @@ import tensorflow as tf
 import numpy as np
 from collections import defaultdict
 from PIL import Image, ImageDraw
-
+from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
 
 
 
@@ -49,6 +49,36 @@ class Reader:
             self.convert_to_tfrecord(self.data_dir)
 
 
+    def _get_anchors(self):
+        """
+        Introduction
+        ------------
+            获取anchors
+        Returns
+        -------
+            anchors: anchor数组
+        """
+        anchors_path = os.path.expanduser(self.anchors_path)
+        with open(anchors_path) as f:
+            anchors = f.readline()
+        anchors = [float(x) for x in anchors.split(',')]
+        return np.array(anchors).reshape(-1, 2)
+
+    def _get_class(self, classes_path):
+        """
+        Introduction
+        ------------
+            获取类别名字
+        Returns
+        -------
+            class_names: coco数据集类别对应的名字
+        """
+        classes_path = os.path.expanduser(classes_path)
+        with open(classes_path) as f:
+            class_names = f.readlines()
+        class_names = [c.strip() for c in class_names]
+        return class_names
+
     def Preprocess_true_boxes(self, true_boxes):
         """
         Introduction
@@ -65,7 +95,7 @@ class Reader:
         anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
         true_boxes = np.array(true_boxes, dtype='float32')
         input_shape = np.array([self.input_shape, self.input_shape], dtype='int32')
-        boxes_xy = (true_boxes[..., 0:2] + true_boxes[..., 2:4]) / 2.
+        boxes_xy = (true_boxes[..., 0:2] + true_boxes[..., 2:4]) // 2.
         boxes_wh = true_boxes[..., 2:4] - true_boxes[..., 0:2]
         true_boxes[..., 0:2] = boxes_xy / input_shape[::-1]
         true_boxes[..., 2:4] = boxes_wh / input_shape[::-1]
@@ -108,21 +138,6 @@ class Reader:
                     y_true[l][j, i, k, 5 + c] = 1.
         return y_true[0], y_true[1], y_true[2]
 
-
-    def _get_anchors(self):
-        """
-        Introduction
-        ------------
-            获取anchors
-        Returns
-        -------
-            anchors: anchor数组
-        """
-        anchors_path = os.path.expanduser(self.anchors_path)
-        with open(anchors_path) as f:
-            anchors = f.readline()
-        anchors = [float(x) for x in anchors.split(',')]
-        return np.array(anchors).reshape(-1, 2)
 
 
     def read_annotations(self):
@@ -176,6 +191,7 @@ class Reader:
                     y_max = y_min + info[0][3]
                     boxes.append(np.array([x_min, y_min, x_max, y_max, info[1]]))
                 boxes_data.append(np.array(boxes))
+
         return image_data, boxes_data
 
 
@@ -290,25 +306,25 @@ class Reader:
             flip_up_down = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
             image = tf.cond(flip_up_down, lambda : tf.image.flip_up_down(image), lambda : image)
 
-            # # 随机调整颜色
-            # delta = tf.random_uniform([], dtype = tf.float32, minval = -self.hue, maxval = self.hue)
-            # image = tf.image.adjust_hue(image / 255., delta) * 255.
-            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-            #
-            # # 随机调整饱和度
-            # saturation_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.sat)
-            # image = tf.image.adjust_saturation(image / 255., saturation_factor) * 255.
-            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-            #
-            # # 随机调整对比度
-            # contrast_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.cont)
-            # image = tf.image.adjust_contrast(image / 255., contrast_factor) * 255.
-            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
-            #
-            # # 随机调整亮度
-            # bright_factor = tf.random_uniform([], dtype = tf.float32, minval = -self.bri, maxval = self.bri)
-            # image = tf.image.adjust_brightness(image / 255., bright_factor) * 255.
-            # image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+            # 随机调整颜色
+            delta = tf.random_uniform([], dtype = tf.float32, minval = -self.hue, maxval = self.hue)
+            image = tf.image.adjust_hue(image / 255., delta) * 255.
+            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+
+            # 随机调整饱和度
+            saturation_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.sat)
+            image = tf.image.adjust_saturation(image / 255., saturation_factor) * 255.
+            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+
+            # 随机调整对比度
+            contrast_factor = tf.random_uniform([], dtype = tf.float32, minval = 1, maxval = self.cont)
+            image = tf.image.adjust_contrast(image / 255., contrast_factor) * 255.
+            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
+
+            # 随机调整亮度
+            bright_factor = tf.random_uniform([], dtype = tf.float32, minval = -self.bri, maxval = self.bri)
+            image = tf.image.adjust_brightness(image / 255., bright_factor) * 255.
+            image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 255.0)
 
             def _flip_left_right_boxes(boxes):
                 xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis=1)
@@ -416,9 +432,9 @@ def draw_boxes(image_data, box, class_names):
                       for x in range(len(class_names))]
     colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
     colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
-    np.random.seed(10101)  # Fixed seed for consistent colors across runs.
-    np.random.shuffle(colors)  # Shuffle colors to decorrelate adjacent classes.
-    np.random.seed(None)  # Reset seed to default.
+    np.random.seed(10101)
+    np.random.shuffle(colors)
+    np.random.seed(None)
     thickness = (image.size[0] + image.size[1]) // 300
     for index in range(box.shape[0]):
 
@@ -451,18 +467,5 @@ def draw_boxes(image_data, box, class_names):
         draw.text(list(text_origin), label, fill=(0, 0, 0))
     return image
 
-def _get_class(classes_path):
-    """
-    Introduction
-    ------------
-        获取类别名字
-    Returns
-    -------
-        class_names: coco数据集类别对应的名字
-    """
-    classes_path = os.path.expanduser(classes_path)
-    with open(classes_path) as f:
-        class_names = f.readlines()
-    class_names = [c.strip() for c in class_names]
-    return class_names
+
 

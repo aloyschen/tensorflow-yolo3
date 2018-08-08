@@ -24,15 +24,12 @@ class yolo_predictor:
         self.anchors_path = anchors_file
         self.class_names = self._get_class()
         self.anchors = self._get_anchors()
-        hsv_tuples = [(x / len(self.class_names), 1., 1.)
-                      for x in range(len(self.class_names))]
+        hsv_tuples = [(x / len(self.class_names), 1., 1.)for x in range(len(self.class_names))]
         self.colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
-        self.colors = list(
-            map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)),
-                self.colors))
-        random.seed(10101)  # Fixed seed for consistent colors across runs.
-        random.shuffle(self.colors)  # Shuffle colors to decorrelate adjacent classes.
-        random.seed(None)  # Reset seed to default.
+        self.colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), self.colors))
+        random.seed(10101)
+        random.shuffle(self.colors)
+        random.seed(None)
 
 
     def _get_class(self):
@@ -108,7 +105,7 @@ class yolo_predictor:
         boxes_ = tf.concat(boxes_, axis = 0)
         scores_ = tf.concat(scores_, axis = 0)
         classes_ = tf.concat(classes_, axis = 0)
-        return boxes_, scores_, classes_, box_scores
+        return boxes_, scores_, classes_
 
 
     def boxes_and_scores(self, feats, anchors, classes_num, input_shape, image_shape):
@@ -129,7 +126,7 @@ class yolo_predictor:
             boxes_scores: 物体框的分数，为置信度和类别概率的乘积
         """
         box_xy, box_wh, box_confidence, box_class_probs = self._get_feats(feats, anchors, classes_num, input_shape)
-        boxes = self.correct_boxes(box_xy, box_wh, input_shape,image_shape)
+        boxes = self.correct_boxes(box_xy, box_wh, input_shape, image_shape)
         boxes = tf.reshape(boxes, [-1, 4])
         box_scores = box_confidence * box_class_probs
         box_scores = tf.reshape(box_scores, [-1, classes_num])
@@ -224,5 +221,5 @@ class yolo_predictor:
         """
         model = yolo(config.norm_epsilon, config.norm_decay, self.anchors_path, self.classes_path, pre_train = True)
         output = model.yolo_inference(inputs, config.num_anchors // 3, config.num_classes, training = False)
-        boxes, scores, classes, box_scores  = self.eval(output, image_shape, max_boxes = 20)
-        return boxes, scores, classes, output
+        boxes, scores, classes = self.eval(output, image_shape, max_boxes = 20)
+        return boxes, scores, classes

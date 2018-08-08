@@ -98,15 +98,15 @@ def train():
     learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 10000, 0.95, staircase = True)
     optimizer = tf.train.AdamOptimizer(learning_rate = learning_rate)
     # 如果读取预训练权重，则冻结darknet53网络的变量
-    if config.pre_train:
-        train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
-        train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list = train_var)
-    else:
-        train_op = optimizer.minimize(loss = loss, global_step = global_step)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        if config.pre_train:
+            train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
+            train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list = train_var)
+        else:
+            train_op = optimizer.minimize(loss = loss, global_step = global_step)
     init = tf.global_variables_initializer()
     saver = tf.train.Saver()
-    # 训练时更新batch norm的参数操作
-    extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.Session(config = tf.ConfigProto(log_device_placement = False)) as sess:
         ckpt = tf.train.get_checkpoint_state(config.model_dir)
         if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
@@ -120,7 +120,7 @@ def train():
         for epoch in range(config.Epoch):
             for step in range(int(config.train_num / config.train_batch_size)):
                 start_time = time.time()
-                train_loss, _, _ = sess.run([loss, train_op, extra_update_ops], {images : images_train.eval(), bbox_true_13 : bbox_true_13_train.eval(), bbox_true_26 : bbox_true_26_train.eval(), bbox_true_52 : bbox_true_52_train.eval(), is_training : True})
+                train_loss, _ = sess.run([loss, train_op], {images : images_train.eval(), bbox_true_13 : bbox_true_13_train.eval(), bbox_true_26 : bbox_true_26_train.eval(), bbox_true_52 : bbox_true_52_train.eval(), is_training : True})
                 duration = time.time() - start_time
                 examples_per_sec = float(duration) / config.train_batch_size
                 format_str = ('Epoch {} step {},  train loss = {} ( {} examples/sec; {} ''sec/batch)')
@@ -179,62 +179,57 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
             bbox_true_52 = tf.placeholder(shape = [None, 52, 52, 3, 85], dtype = tf.float32)
             bbox_true = [bbox_true_13, bbox_true_26, bbox_true_52]
             output = model.yolo_inference(images, config.num_anchors / 3, config.num_classes, is_training)
-            loss, accuracy, pred_object = model.yolo_loss(output, bbox_true, model.anchors, config.num_classes, config.ignore_thresh)
+            loss = model.yolo_loss(output, bbox_true, model.anchors, config.num_classes, config.ignore_thresh)
             tf.summary.scalar('loss', loss)
             learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 1000, 0.95, staircase = True)
             optimizer = tf.train.AdamOptimizer(learning_rate = learning_rate)
             # 如果读取预训练权重，则冻结darknet53网络的变量
-            if config.pre_train:
-                train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
-                train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list = train_var)
-            else:
-                train_op = optimizer.minimize(loss = loss, global_step = global_step)
+            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+            with tf.control_dependencies(update_ops):
+                if config.pre_train:
+                    train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
+                    train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list=train_var)
+                else:
+                    train_op = optimizer.minimize(loss = loss, global_step = global_step)
             init = tf.global_variables_initializer()
             saver = tf.train.Saver()
-            # 训练时更新batch norm的参数操作
-            extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-            with tf.Session(config = tf.ConfigProto(log_device_placement = False)) as sess:
+            with tf.Session(config=tf.ConfigProto(log_device_placement=False)) as sess:
                 ckpt = tf.train.get_checkpoint_state(config.model_dir)
                 if ckpt and tf.train.checkpoint_exists(ckpt.model_checkpoint_path):
+                    print('restore model', ckpt.model_checkpoint_path)
                     saver.restore(sess, ckpt.model_checkpoint_path)
                 else:
                     sess.run(init)
                 summary_writer = tf.summary.FileWriter('./logs', sess.graph)
-                tf.train.start_queue_runners(sess =sess)
-
-                for step in range(int(config.Epoch * config.train_num / config.train_batch_size)):
-                    loss_value, _, _, pred = sess.run(
-                        [loss, train_op, extra_update_ops, pred_object],
-                        {images: images_train.eval(), bbox_true_13: bbox_true_13_train.eval(),
-                         bbox_true_26: bbox_true_26_train.eval(), bbox_true_52: bbox_true_52_train.eval(),
-                         is_training: True})
-                    for index in range(3):
-                        print("pred: object: {}".format(pred[index][pred[index] > 0]))
-                    if step % 2 == 0:
+                tf.train.start_queue_runners(sess=sess)
+                best_loss_valid = 10e6
+                for epoch in range(config.Epoch):
+                    for step in range(int(config.train_num / config.train_batch_size)):
                         start_time = time.time()
-                        train_loss = sess.run(loss, {images: images_train.eval(), bbox_true_13: bbox_true_13_train.eval(), bbox_true_26: bbox_true_26_train.eval(), bbox_true_52: bbox_true_52_train.eval(), is_training: True})
+                        train_loss, _ = sess.run([loss, train_op], {images: images_train.eval(), bbox_true_13: bbox_true_13_train.eval(), bbox_true_26: bbox_true_26_train.eval(),bbox_true_52: bbox_true_52_train.eval(), is_training: True})
                         duration = time.time() - start_time
                         examples_per_sec = float(duration) / config.train_batch_size
-                        format_str = ('step {},  train loss = {} ( {} examples/sec; {} ''sec/batch)')
-                        print(format_str.format(step, train_loss, examples_per_sec, duration))
-                        summary_writer.add_summary(
-                            summary=tf.Summary(value=[tf.Summary.Value(tag="train loss", simple_value=train_loss)]),
-                            global_step=step)
+                        format_str = ('Epoch {} step {},  train loss = {} ( {} examples/sec; {} ''sec/batch)')
+                        print(format_str.format(epoch, step, train_loss, examples_per_sec, duration))
+                        summary_writer.add_summary(summary=tf.Summary(value=[tf.Summary.Value(tag="train loss", simple_value=train_loss)]), global_step=step)
                         summary_writer.flush()
-                    # Save the model checkpoint periodically.
-                    if step > 1 and step % 1000 == 0:
-                        checkpoint_path = os.path.join(config.model_dir, 'model.ckpt')
-                        saver.save(sess, checkpoint_path, global_step=step)
-                    # Run validation periodically
-                    if step > 1 and step % 20 == 0:
+                    mean_loss_val = []
+                    for step in range(int(config.val_num / config.val_batch_size)):
                         start_time = time.time()
-                        val_loss = sess.run(loss, {images: images_val.eval(), bbox_true_13: bbox_true_13_val.eval(), bbox_true_26: bbox_true_26_val.eval(), bbox_true_52: bbox_true_52_val.eval(), is_training: False})
+                        val_loss = sess.run(loss, {images: images_val.eval(), bbox_true_13: bbox_true_13_val.eval(), bbox_true_26: bbox_true_26_val.eval(),bbox_true_52: bbox_true_52_val.eval(), is_training: False})
                         duration = time.time() - start_time
                         examples_per_sec = float(duration) / config.val_batch_size
-                        format_str = ('step {}, val loss = {} ({} examples/sec; {} ''sec/batch)')
-                        print(format_str.format(step, val_loss, examples_per_sec, duration))
-                        summary_writer.add_summary(summary = tf.Summary(value=[tf.Summary.Value(tag="val loss", simple_value = val_loss)]), global_step = step)
+                        format_str = ('Epoch {} step {}, val loss = {} ({} examples/sec; {} ''sec/batch)')
+                        print(format_str.format(epoch, step, val_loss, examples_per_sec, duration))
+                        summary_writer.add_summary(summary=tf.Summary(value=[tf.Summary.Value(tag="val loss", simple_value=val_loss)]),global_step=step)
                         summary_writer.flush()
+                        mean_loss_val.append(val_loss)
+                    mean_loss_valid = np.mean(mean_loss_val)
+                    if best_loss_valid > mean_loss_valid:
+                        best_loss_valid = mean_loss_valid
+                        checkpoint_path = os.path.join(config.model_dir, 'model.ckpt')
+                        saver.save(sess, checkpoint_path, global_step=epoch)
+
 
 if __name__ == "__main__":
     train()

@@ -13,6 +13,13 @@ class yolo:
         Introduction
         ------------
             初始化函数
+        Parameters
+        ----------
+            norm_decay: 在预测时计算moving average时的衰减率
+            norm_epsilon: 方差加上极小的数，防止除以0的情况
+            anchors_path: yolo anchor 文件路径
+            classes_path: 数据集类别对应文件
+            pre_train: 是否使用预训练darknet53模型
         """
         self.norm_epsilon = norm_epsilon
         self.pre_train = pre_train
@@ -153,8 +160,8 @@ class yolo:
             strides: 卷积步长
             name: 卷积层名字
             trainging: 是否为训练过程
-            norm_decay: 在预测时计算moving average时的衰减率
-            norm_epsilon: 方差加上极小的数，防止除以0的情况
+            use_bias: 是否使用偏置项
+            kernel_size: 卷积核大小
         Returns
         -------
             conv: 卷积之后的feature map
@@ -323,7 +330,7 @@ class yolo:
             根据不同大小的feature map做多尺度的检测，三种feature map大小分别为13x13x1024, 26x26x512, 52x52x256
         Parameters
         ----------
-            predictions: 输入的特征feature map
+            feats: 输入的特征feature map
             anchors: 针对不同大小的feature map的anchor
             num_classes: 类别的数量
             input_shape: 图像的输入大小，一般为416
@@ -358,8 +365,9 @@ class yolo:
             该函数是将box的坐标修正，除去之前按照长宽比缩放填充的部分，最后将box的坐标还原成相对原始图片的
         Parameters
         ----------
-            box_xy: box的中心坐标
-            box_wh: box的长宽
+            feats: 模型输出feature map
+            anchors: 模型anchors
+            num_classes: 数据集类别数
             input_shape: 训练输入图片大小
             image_shape: 原始图片的大小
         """

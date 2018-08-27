@@ -21,7 +21,7 @@ class Reader:
             input_shape: 图像输入模型的大小
             max_boxes: 每张图片最大的box数量
             jitter: 随机长宽比系数
-            hue: 调整hue颜色空间系数
+            hue: 调整hsv颜色空间系数
             sat: 调整饱和度系数
             cont: 调整对比度系数
             bri: 调整亮度系数
@@ -83,9 +83,6 @@ class Reader:
         Parameters
         ----------
             true_boxes: ground truth box 形状为[boxes, 5], x_min, y_min, x_max, y_max, class_id
-            input_shape: 输入训练图像的长宽
-            anchors: 根据数据集box聚类得到的长宽，形状为[9，2]
-            num_classes: 类别数量
         """
         num_layers = self.anchors.shape[0] // 3
         anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
@@ -198,11 +195,7 @@ class Reader:
             将图片和boxes数据存储为tfRecord
         Parameters
         ----------
-            mode: 训练集还是验证集的数据
             tfrecord_path: tfrecord文件存储路径
-            annotations_path: 标注文件的路径
-            image_data_file: 图片文件路径
-            path: tfRecord的路径
         """
         output_file = os.path.join(tfrecord_path, self.mode + '.tfrecords')
         image_data, boxes_data = self.read_annotations()
@@ -236,11 +229,10 @@ class Reader:
         """
         Introduction
         ------------
-            对所有的数据集每条数据进行处理
+            解析tfRecord数据
         Parameters
         ----------
-            image_file: 图片路径
-            box: 图片对应的box坐标
+            serialized_example: 序列化的每条数据
         """
         features = tf.parse_single_example(
             serialized_example,
@@ -371,35 +363,6 @@ class Reader:
         bbox = tf.cond(tf.greater(tf.shape(bbox)[0], 20), lambda: bbox[:20], lambda: tf.pad(bbox, paddings = [[0, 20 - tf.shape(bbox)[0]], [0, 0]], mode = 'CONSTANT'))
         bbox_true_13, bbox_true_26, bbox_true_52 = tf.py_func(self.Preprocess_true_boxes, [bbox], [tf.float32, tf.float32, tf.float32])
         return image, bbox_true_13, bbox_true_26, bbox_true_52
-
-    def make_batch(self, batch_size):
-        """
-        Introduction
-        ------------
-            读取训练集、验证集、测试集的tfRecord的数据
-        Parameters
-        ----------
-            batch_size: batch的大小
-        Returns
-        -------
-        """
-        Dataset = tf.data.TFRecordDataset(filenames = self.TfrecordFile).repeat()
-        Dataset = Dataset.prefetch(buffer_size = 1000)
-        if self.mode == 'train':
-            Dataset = Dataset.shuffle(buffer_size = config.train_num).repeat()
-        Dataset = Dataset.map(self.parser, num_parallel_calls = config.num_parallel_calls)
-        
-        # 并行的对数据进行map预处理
-        Dataset = Dataset.batch(batch_size)
-        iterator = Dataset.make_one_shot_iterator()
-        image_batch, bbox_true_13, bbox_true_26, bbox_true_52 = iterator.get_next()
-        # 这里因为tf.pyfunc返回的tensor没有shape, 所以需要重新设置一下
-        grid_shapes = [self.input_shape // 32, self.input_shape // 16, self.input_shape // 8]
-        image_batch.set_shape([batch_size, self.input_shape, self.input_shape, 3])
-        bbox_true_13.set_shape([batch_size, grid_shapes[0], grid_shapes[0], 3, 5 + self.num_classes])
-        bbox_true_26.set_shape([batch_size, grid_shapes[1], grid_shapes[1], 3, 5 + self.num_classes])
-        bbox_true_52.set_shape([batch_size, grid_shapes[2], grid_shapes[2], 3, 5 + self.num_classes])
-        return image_batch, bbox_true_13, bbox_true_26, bbox_true_52
 
 
     def provide(self, batch_size):

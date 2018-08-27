@@ -100,7 +100,7 @@ def detect(image_path, model_path, yolo_weights = None):
     """
     Introduction
     ------------
-        加载训练好的模型，进行预测
+        加载模型，进行预测
     Parameters
     ----------
         model_path: 模型路径

@@ -1,5 +1,6 @@
 import os
 import config
+import argparse
 import numpy as np
 import tensorflow as tf
 from yolo_predict import yolo_predictor
@@ -30,7 +31,72 @@ def letterbox_image(image, size):
     return boxed_image
 
 
-def detect(image_path, model_path):
+def load_weights(var_list, weights_file):
+    """
+    Introduction
+    ------------
+        加载预训练好的darknet53权重文件
+    Parameters
+    ----------
+        var_list: 赋值变量名
+        weights_file: 权重文件
+    Returns
+    -------
+        assign_ops: 赋值更新操作
+    """
+    with open(weights_file, "rb") as fp:
+        _ = np.fromfile(fp, dtype=np.int32, count=5)
+
+        weights = np.fromfile(fp, dtype=np.float32)
+
+    ptr = 0
+    i = 0
+    assign_ops = []
+    while i < len(var_list) - 1:
+        var1 = var_list[i]
+        var2 = var_list[i + 1]
+        # do something only if we process conv layer
+        if 'conv2d' in var1.name.split('/')[-2]:
+            # check type of next layer
+            if 'batch_normalization' in var2.name.split('/')[-2]:
+                # load batch norm params
+                gamma, beta, mean, var = var_list[i + 1:i + 5]
+                batch_norm_vars = [beta, gamma, mean, var]
+                for var in batch_norm_vars:
+                    shape = var.shape.as_list()
+                    num_params = np.prod(shape)
+                    var_weights = weights[ptr:ptr + num_params].reshape(shape)
+                    ptr += num_params
+                    assign_ops.append(tf.assign(var, var_weights, validate_shape=True))
+
+                # we move the pointer by 4, because we loaded 4 variables
+                i += 4
+            elif 'conv2d' in var2.name.split('/')[-2]:
+                # load biases
+                bias = var2
+                bias_shape = bias.shape.as_list()
+                bias_params = np.prod(bias_shape)
+                bias_weights = weights[ptr:ptr + bias_params].reshape(bias_shape)
+                ptr += bias_params
+                assign_ops.append(tf.assign(bias, bias_weights, validate_shape=True))
+
+                # we loaded 1 variable
+                i += 1
+            # we can load weights of conv layer
+            shape = var1.shape.as_list()
+            num_params = np.prod(shape)
+
+            var_weights = weights[ptr:ptr + num_params].reshape((shape[3], shape[2], shape[0], shape[1]))
+            # remember to transpose to column-major
+            var_weights = np.transpose(var_weights, (2, 3, 1, 0))
+            ptr += num_params
+            assign_ops.append(tf.assign(var1, var_weights, validate_shape=True))
+            i += 1
+
+    return assign_ops
+
+
+def detect(image_path, model_path, yolo_weights = None):
     """
     Introduction
     ------------
@@ -49,18 +115,22 @@ def detect(image_path, model_path):
     input_image_shape = tf.placeholder(dtype = tf.int32, shape = (2,))
     input_image = tf.placeholder(shape = [None, 416, 416, 3], dtype = tf.float32)
     predictor = yolo_predictor(config.obj_threshold, config.nms_threshold, config.classes_path, config.anchors_path)
-    boxes, scores, classes, output = predictor.predict(input_image, input_image_shape)
+    boxes, scores, classes = predictor.predict(input_image, input_image_shape)
     with tf.Session() as sess:
-        #加载训练好的模型
-        saver = tf.train.Saver()
-        saver.restore(sess, model_path + '/model.ckpt-0')
-        out_boxes, out_scores, out_classes, output_value = sess.run(
-            [boxes, scores, classes, output],
+        if yolo_weights is not None:
+            with tf.variable_scope('predict'):
+                boxes, scores, classes = predictor.predict(input_image, input_image_shape)
+            load_op = load_weights(tf.global_variables(scope = 'predict'), weights_file = yolo_weights)
+            sess.run(load_op)
+        else:
+            saver = tf.train.Saver()
+            saver.restore(sess, model_path)
+        out_boxes, out_scores, out_classes = sess.run(
+            [boxes, scores, classes],
             feed_dict={
                 input_image: image_data,
                 input_image_shape: [image.size[1], image.size[0]]
             })
-        print(output_value[0][..., 5:])
         print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
         font = ImageFont.truetype(font = 'font/FiraMono-Medium.otf', size = np.floor(3e-2 * image.size[1] + 0.5).astype('int32'))
         thickness = (image.size[0] + image.size[1]) // 300
@@ -100,4 +170,12 @@ def detect(image_path, model_path):
         image.save('./result.jpg')
 
 if __name__ == '__main__':
-    detect(config.model_dir, './test.jpg')
+    parser = argparse.ArgumentParser(argument_default = argparse.SUPPRESS)
+    parser.add_argument(
+        '--image_file', type = str, help = 'image file path'
+    )
+    FLAGS = parser.parse_args()
+    if config.pre_train_yolo3 == True:
+        detect(FLAGS.image_file, config.model_dir, config.yolo3_weights)
+    else:
+        detect(FLAGS.image_file, config.model_dir)

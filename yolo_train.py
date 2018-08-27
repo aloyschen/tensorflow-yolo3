@@ -1,7 +1,6 @@
 import os
 import time
 import config
-import numpy as np
 from dataReader import Reader
 import tensorflow as tf
 from model.yolo3_model import yolo
@@ -13,13 +12,14 @@ def train():
     ------------
         训练模型
     """
+    # 指定使用GPU的Index
     os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_index
     train_data = Reader('train', config.data_dir, config.anchors_path, config.num_classes, input_shape = config.input_shape, max_boxes = config.max_boxes, jitter = config.jitter, hue = config.hue, sat = config.sat, cont = config.cont, bri = config.bri)
     val_data = Reader('val', config.data_dir, config.anchors_path, config.num_classes, input_shape = config.input_shape, max_boxes = config.max_boxes)
     images_train, bbox_true_13_train, bbox_true_26_train, bbox_true_52_train = train_data.provide(config.train_batch_size)
     images_val, bbox_true_13_val, bbox_true_26_val, bbox_true_52_val = val_data.provide(config.val_batch_size)
 
-    model = yolo(config.norm_epsilon, config.norm_decay, config.anchors_path, config.classes_path, config.pre_train, config.weights_file)
+    model = yolo(config.norm_epsilon, config.norm_decay, config.anchors_path, config.classes_path, config.pre_train)
     is_training = tf.placeholder(dtype = tf.bool, shape = [])
     images = tf.placeholder(shape = [None, 416, 416, 3], dtype = tf.float32)
     bbox_true_13 = tf.placeholder(shape = [None, 13, 13, 3, 85], dtype = tf.float32)
@@ -50,7 +50,7 @@ def train():
         else:
             sess.run(init)
         if model.pre_train is True:
-            load_ops = model.load_weights(tf.global_variables(scope = 'darknet53'), config.weights_file)
+            load_ops = model.load_weights(tf.global_variables(scope = 'darknet53'), config.darknet53_weights)
             sess.run(load_ops)
         summary_writer = tf.summary.FileWriter('./logs', sess.graph)
         tf.train.start_queue_runners(sess = sess)
@@ -107,12 +107,10 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
                                 hue=config.hue, sat=config.sat, cont=config.cont, bri=config.bri)
             val_data = Reader('val', config.data_dir, config.anchors_path, config.num_classes,
                               input_shape=config.input_shape, max_boxes=config.max_boxes)
-            images_train, bbox_true_13_train, bbox_true_26_train, bbox_true_52_train = train_data.provide(
-                config.train_batch_size)
+            images_train, bbox_true_13_train, bbox_true_26_train, bbox_true_52_train = train_data.provide(config.train_batch_size)
             images_val, bbox_true_13_val, bbox_true_26_val, bbox_true_52_val = val_data.provide(config.val_batch_size)
 
-            model = yolo(config.norm_epsilon, config.norm_decay, config.anchors_path, config.classes_path,
-                         config.pre_train, config.weights_file)
+            model = yolo(config.norm_epsilon, config.norm_decay, config.anchors_path, config.classes_path, config.pre_train)
             is_training = tf.placeholder(dtype=tf.bool, shape=[])
             images = tf.placeholder(shape=[None, 416, 416, 3], dtype=tf.float32)
             bbox_true_13 = tf.placeholder(shape=[None, 13, 13, 3, 85], dtype=tf.float32)
@@ -143,7 +141,7 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
                 else:
                     sess.run(init)
                 if model.pre_train is True:
-                    load_ops = model.load_weights(tf.global_variables(scope='darknet53'), config.weights_file)
+                    load_ops = model.load_weights(tf.global_variables(scope='darknet53'), config.darknet53_weights)
                     sess.run(load_ops)
                 summary_writer = tf.summary.FileWriter('./logs', sess.graph)
                 tf.train.start_queue_runners(sess=sess)

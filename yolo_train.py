@@ -50,7 +50,7 @@ def train():
         else:
             sess.run(init)
         if model.pre_train is True:
-            load_ops = model.load_weights(tf.global_variables(scope = 'darknet53'), config.darknet53_weights)
+            load_ops = model.load_weights(tf.global_variables(scope = 'darknet53'), config.darknet53_weights_path)
             sess.run(load_ops)
         summary_writer = tf.summary.FileWriter('./logs', sess.graph)
         tf.train.start_queue_runners(sess = sess)
@@ -141,7 +141,7 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
                 else:
                     sess.run(init)
                 if model.pre_train is True:
-                    load_ops = model.load_weights(tf.global_variables(scope='darknet53'), config.darknet53_weights)
+                    load_ops = model.load_weights(tf.global_variables(scope='darknet53'), config.darknet53_weights_path)
                     sess.run(load_ops)
                 summary_writer = tf.summary.FileWriter('./logs', sess.graph)
                 tf.train.start_queue_runners(sess=sess)

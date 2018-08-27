@@ -176,6 +176,6 @@ if __name__ == '__main__':
     )
     FLAGS = parser.parse_args()
     if config.pre_train_yolo3 == True:
-        detect(FLAGS.image_file, config.model_dir, config.yolo3_weights)
+        detect(FLAGS.image_file, config.model_dir, config.yolo3_weights_path)
     else:
         detect(FLAGS.image_file, config.model_dir)

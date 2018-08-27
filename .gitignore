@@ -25,5 +25,6 @@ live_hot_statistic.py
 /lstm_coinbase/data/price.csv
 /data/*
 /annotations/*
-./model.tar
 /test_model/*
+/model_data/darknet53.weights
+/model_data/yolov3.weights

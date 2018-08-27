@@ -1,12 +1,10 @@
 import os
 import config
 import json
-import colorsys
 import tensorflow as tf
 import numpy as np
 from collections import defaultdict
-from PIL import Image, ImageDraw
-from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
+
 
 
 
@@ -297,7 +295,7 @@ class Reader:
             dy = tf.cond(tf.greater(input_high - new_high, 0), lambda: tf.divide(tf.subtract(input_high, new_high), 2), lambda: 0.)
             image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
             image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
-
+            image = tf.where(tf.equal(image, 0), 128 * tf.ones_like(image), image)
             # 随机左右翻转图片
             flip_left_right = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
             image = tf.cond(flip_left_right, lambda : tf.image.flip_left_right(image), lambda : image)
@@ -360,6 +358,7 @@ class Reader:
             dy = tf.divide(tf.subtract(input_high, new_high), 2)
             image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
             image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
+            image = tf.where(tf.equal(image, 0), 128 * tf.ones_like(image), image)
             xmin, ymin, xmax, ymax, label = tf.split(value = bbox, num_or_size_splits = 5, axis = 1)
             xmin = xmin * new_width / image_width + dx
             xmax = xmax * new_width / image_width + dx
@@ -425,47 +424,4 @@ class Reader:
         bbox_true_52.set_shape([grid_shapes[2], grid_shapes[2], 3, 5 + self.num_classes])
         images, bboxes_true_13, bboxes_true_26, bboxes_true_52 = tf.train.shuffle_batch([image, bbox_true_13, bbox_true_26, bbox_true_52], batch_size = batch_size, capacity = 20 * batch_size, num_threads = 10, min_after_dequeue = 10 * batch_size)
         return images, bboxes_true_13, bboxes_true_26, bboxes_true_52
-
-def draw_boxes(image_data, box, class_names):
-    image = Image.fromarray((image_data).astype('uint8'), 'RGB')
-    hsv_tuples = [(x / len(class_names), 1., 1.)
-                      for x in range(len(class_names))]
-    colors = list(map(lambda x: colorsys.hsv_to_rgb(*x), hsv_tuples))
-    colors = list(map(lambda x: (int(x[0] * 255), int(x[1] * 255), int(x[2] * 255)), colors))
-    np.random.seed(10101)
-    np.random.shuffle(colors)
-    np.random.seed(None)
-    thickness = (image.size[0] + image.size[1]) // 300
-    for index in range(box.shape[0]):
-
-        predicted_class = class_names[int(box[index][4])]
-        label = '{}'.format(predicted_class)
-        draw = ImageDraw.Draw(image)
-        label_size = draw.textsize(label)
-        left, top, right, bottom, _ = box[index]
-        top = max(0, np.floor(top + 0.5).astype('int32'))
-        left = max(0, np.floor(left + 0.5).astype('int32'))
-        bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-        right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-        if top ==0 and left == 0 and right == 0 and bottom == 0:
-            continue
-        if top - label_size[1] >= 0:
-            text_origin = np.array([left, top - label_size[1]])
-        else:
-            text_origin = np.array([left, top + 1])
-
-        # My kingdom for a good redistributable image drawing library.
-        for i in range(thickness):
-            draw.rectangle(
-                [left + i, top + i, right - i, bottom - i],
-                outline=colors[int(box[index][4])])
-        draw.rectangle(
-            [tuple(text_origin), tuple(text_origin + label_size)],
-            fill=colors[int(box[index][4])])
-        print(label)
-        text_origin = text_origin.astype(np.int32)
-        draw.text(list(text_origin), label, fill=(0, 0, 0))
-    return image
-
-
 

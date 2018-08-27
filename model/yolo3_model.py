@@ -1,6 +1,8 @@
 # -*- coding:utf-8 -*-
 # author: gaochen
 # date: 2018.06.04
+
+
 import numpy as np
 import tensorflow as tf
 import os
@@ -48,24 +50,72 @@ class yolo:
         anchors = [float(x) for x in anchors.split(',')]
         return np.array(anchors).reshape(-1, 2)
 
-    def load_weights(self, weights_path):
+    def load_weights(self, var_list, weights_file):
         """
         Introduction
         ------------
             加载预训练好的darknet53权重文件
         Parameters
         ----------
-            weights_path: 权重文件
+            var_list: 赋值变量名
+            weights_file: 权重文件
+        Returns
+        -------
+            assign_ops: 赋值更新操作
         """
-        try:
-            weights_dict = np.load(weights_path).item()
-        except:
-            weights_dict = np.load(weights_path, encoding='bytes').item()
+        with open(weights_file, "rb") as fp:
+            _ = np.fromfile(fp, dtype=np.int32, count=5)
 
-        return weights_dict
+            weights = np.fromfile(fp, dtype=np.float32)
+
+        ptr = 0
+        i = 0
+        assign_ops = []
+        while i < len(var_list) - 1:
+            var1 = var_list[i]
+            var2 = var_list[i + 1]
+            # do something only if we process conv layer
+            if 'conv2d' in var1.name.split('/')[-2]:
+                # check type of next layer
+                if 'batch_normalization' in var2.name.split('/')[-2]:
+                    # load batch norm params
+                    gamma, beta, mean, var = var_list[i + 1:i + 5]
+                    batch_norm_vars = [beta, gamma, mean, var]
+                    for var in batch_norm_vars:
+                        shape = var.shape.as_list()
+                        num_params = np.prod(shape)
+                        var_weights = weights[ptr:ptr + num_params].reshape(shape)
+                        ptr += num_params
+                        assign_ops.append(tf.assign(var, var_weights, validate_shape=True))
+
+                    # we move the pointer by 4, because we loaded 4 variables
+                    i += 4
+                elif 'conv2d' in var2.name.split('/')[-2]:
+                    # load biases
+                    bias = var2
+                    bias_shape = bias.shape.as_list()
+                    bias_params = np.prod(bias_shape)
+                    bias_weights = weights[ptr:ptr + bias_params].reshape(bias_shape)
+                    ptr += bias_params
+                    assign_ops.append(tf.assign(bias, bias_weights, validate_shape=True))
+
+                    # we loaded 1 variable
+                    i += 1
+                # we can load weights of conv layer
+                shape = var1.shape.as_list()
+                num_params = np.prod(shape)
+
+                var_weights = weights[ptr:ptr + num_params].reshape((shape[3], shape[2], shape[0], shape[1]))
+                # remember to transpose to column-major
+                var_weights = np.transpose(var_weights, (2, 3, 1, 0))
+                ptr += num_params
+                assign_ops.append(tf.assign(var1, var_weights, validate_shape=True))
+                i += 1
+
+        return assign_ops
 
 
-    def _batch_normalization_layer(self, input_layer, weights_dict = None, name = None, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _batch_normalization_layer(self, input_layer, name = None, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
         '''
         Introduction
         ------------
@@ -73,7 +123,6 @@ class yolo:
         Parameters
         ----------
             input_layer: 输入的四维tensor
-            weights_dict: 加载预训练模型时使用的权重字典
             name: batchnorm层的名字
             trainging: 是否为训练过程
             norm_decay: 在预测时计算moving average时的衰减率
@@ -82,26 +131,13 @@ class yolo:
         -------
             bn_layer: batch normalization处理之后的feature map
         '''
-        if weights_dict is not None:
-            mean = tf.constant_initializer(weights_dict[name]['mean'])
-            variance = tf.constant_initializer(weights_dict[name]['var'])
-            offset = tf.constant_initializer(weights_dict[name]['bias'])
-            scale = tf.constant_initializer(weights_dict[name]['scale'])
-            bn_layer = tf.layers.batch_normalization(
-            inputs = input_layer,
+        bn_layer = tf.layers.batch_normalization(inputs = input_layer,
             momentum = norm_decay, epsilon = norm_epsilon, center = True,
-            beta_initializer = offset, gamma_initializer = scale,
-            moving_mean_initializer = mean, moving_variance_initializer = variance,
-            scale = True, training = training)
-        else:
-            bn_layer = tf.layers.batch_normalization(
-            inputs = input_layer,
-            momentum = norm_decay, epsilon = norm_epsilon, center = True,
-            scale = True, training = training)
+            scale = True, training = training, name = name, fused = False)
         return tf.nn.leaky_relu(bn_layer, alpha = 0.1)
 
 
-    def _conv2d_layer(self, inputs, filters_num, kernel_size, name, use_bias = False, weights_dict = None, strides = 1):
+    def _conv2d_layer(self, inputs, filters_num, kernel_size, name, use_bias = False, strides = 1):
         """
         Introduction
         ------------
@@ -115,7 +151,6 @@ class yolo:
             inputs: 输入变量
             filters_num: 卷积核数量
             strides: 卷积步长
-            weights_dict: 如果加载预训练模型需要输入的权重字典
             name: 卷积层名字
             trainging: 是否为训练过程
             norm_decay: 在预测时计算moving average时的衰减率
@@ -127,23 +162,15 @@ class yolo:
         if strides > 1:
             # 在输入feature map的长宽维度进行padding
             inputs = tf.pad(inputs, paddings = [[0, 0], [1, 0], [1, 0], [0, 0]], mode = 'CONSTANT')
-        if weights_dict != None:
-            weight = tf.constant_initializer(weights_dict[name]['weights'])
-            conv = tf.layers.conv2d(
-            inputs = inputs, filters = filters_num,
-            kernel_size = kernel_size, strides = [strides, strides],
-            padding = ('SAME' if strides == 1 else 'VALID'),
-            use_bias = use_bias, kernel_initializer = weight, name = name)
-        else:
-            conv = tf.layers.conv2d(
-            inputs = inputs, filters = filters_num,
-            kernel_size = kernel_size, strides = [strides, strides],
-            padding = ('SAME' if strides == 1 else 'VALID'),
-            use_bias = use_bias, kernel_initializer = tf.contrib.layers.xavier_initializer(), name = name)
+        conv = tf.layers.conv2d(
+        inputs = inputs, filters = filters_num,
+        kernel_size = kernel_size, strides = [strides, strides],
+        padding = ('SAME' if strides == 1 else 'VALID'),
+        use_bias = use_bias, kernel_initializer = tf.contrib.layers.xavier_initializer(), name = name)
         return conv
 
 
-    def _Residual_block(self, inputs, filters_num, blocks_num, conv_index, weights_dict = None, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _Residual_block(self, inputs, filters_num, blocks_num, conv_index, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
         """
         Introduction
         ------------
@@ -163,22 +190,22 @@ class yolo:
             inputs: 经过残差网络处理后的结果
         """
 
-        layer = self._conv2d_layer(inputs, filters_num, kernel_size = 3, strides = 2, name = "conv2d_" + str(conv_index), weights_dict = weights_dict)
-        layer = self._batch_normalization_layer(layer, weights_dict, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+        layer = self._conv2d_layer(inputs, filters_num, kernel_size = 3, strides = 2, name = "conv2d_" + str(conv_index))
+        layer = self._batch_normalization_layer(layer, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
         for _ in range(blocks_num):
             shortcut = layer
-            layer = self._conv2d_layer(layer, filters_num // 2, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index), weights_dict = weights_dict)
-            layer = self._batch_normalization_layer(layer, weights_dict, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            layer = self._conv2d_layer(layer, filters_num // 2, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
+            layer = self._batch_normalization_layer(layer, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             conv_index += 1
-            layer = self._conv2d_layer(layer, filters_num, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index), weights_dict = weights_dict)
-            layer = self._batch_normalization_layer(layer, weights_dict, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            layer = self._conv2d_layer(layer, filters_num, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
+            layer = self._batch_normalization_layer(layer, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             conv_index += 1
             layer += shortcut
         return layer, conv_index
 
 
-    def _darknet53(self, inputs, conv_index, weights_dict = None, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _darknet53(self, inputs, conv_index, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
         """
         Introduction
         ------------
@@ -199,16 +226,16 @@ class yolo:
             conv_index: 卷积层计数，方便在加载预训练模型时使用
         """
         with tf.variable_scope('darknet53') as scope:
-            conv = self._conv2d_layer(inputs, filters_num = 32, kernel_size = 3, strides = 1, weights_dict = weights_dict, name = "conv2d_" + str(conv_index))
-            conv = self._batch_normalization_layer(conv, weights_dict, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv = self._conv2d_layer(inputs, filters_num = 32, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
+            conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             conv_index += 1
-            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, weights_dict = weights_dict, filters_num = 64, blocks_num = 1, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
-            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, weights_dict = weights_dict, filters_num = 128, blocks_num = 2, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
-            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, weights_dict = weights_dict, filters_num = 256, blocks_num = 8, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, filters_num = 64, blocks_num = 1, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, filters_num = 128, blocks_num = 2, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, filters_num = 256, blocks_num = 8, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             route1 = conv
-            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, weights_dict = weights_dict, filters_num = 512, blocks_num = 8, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, filters_num = 512, blocks_num = 8, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             route2 = conv
-            conv, conv_index = self._Residual_block(conv, conv_index = conv_index, weights_dict = weights_dict, filters_num = 1024, blocks_num = 4, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+            conv, conv_index = self._Residual_block(conv, conv_index = conv_index,  filters_num = 1024, blocks_num = 4, training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         return  route1, route2, conv, conv_index
 
 
@@ -223,7 +250,6 @@ class yolo:
             filters_num: 卷积核数量
             out_filters: 最后输出层的卷积核数量
             conv_index: 卷积层数序号，方便根据名字加载预训练权重
-            weights_dict: 预训练权重
             training: 是否为训练
             norm_decay: 在预测时计算moving average时的衰减率
             norm_epsilon: 方差加上极小的数，防止除以0的情况
@@ -267,16 +293,11 @@ class yolo:
             inputs: 模型的输入变量
             num_anchors: 每个grid cell负责检测的anchor数量
             num_classes: 类别数量
-            pre_train: 是否加载预训练模型
             training: 是否为训练模式
         """
-        weights_dict = None
-        if self.pre_train == True and self.weights_file != None:
-            weights_dict = self.load_weights(self.weights_file)
-            print('load weights')
         conv_index = 1
-        conv2d_26, conv2d_45, conv, conv_index = self._darknet53(inputs, conv_index, weights_dict = weights_dict, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
-        with tf.variable_scope('yolo') as scope:
+        conv2d_26, conv2d_45, conv, conv_index = self._darknet53(inputs, conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
+        with tf.variable_scope('yolo'):
             conv2d_57, conv2d_59, conv_index = self._yolo_block(conv, 512, num_anchors * (num_classes + 5), conv_index = conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv2d_60 = self._conv2d_layer(conv2d_57, filters_num = 256, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
             conv2d_60 = self._batch_normalization_layer(conv2d_60, name = "batch_normalization_" + str(conv_index),training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)

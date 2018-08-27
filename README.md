@@ -3,8 +3,6 @@
 [![license](https://img.shields.io/github/license/mashape/apistatus.svg)](LICENSE)
 
 
-## tensorflow implementation of YOLOV3
-
 ---
 
 ## Detection
@@ -22,9 +20,12 @@ python detect.py --image_file ./test.jpg
 
 ## Training
 
+convert train and val data to tfrecord
+
 1、Download the COCO2017 dataset from [COCO_website](http://cocodataset.org)  
-2、Modify the train and val data path in config.py  
-3、If you want to use original pretrained weights for YOLOv3, rename it as darknet53.weights, and modify the darknet53_weights_path in the config.py 
+2、Modify the train and val data path in the config.py  
+3、If you want to use original pretrained weights for YOLOv3, download from [darknet53 weights](https://pjreddie.com/media/files/darknet53.conv.74)   
+4、rename it as darknet53.weights, and modify the darknet53_weights_path in the config.py 
 
 ```
 wget https://pjreddie.com/media/files/darknet53.conv.74`  

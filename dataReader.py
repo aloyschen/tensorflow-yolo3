@@ -6,8 +6,6 @@ import numpy as np
 from collections import defaultdict
 
 
-
-
 class Reader:
     def __init__(self, mode, data_dir, anchors_path, num_classes, input_shape = 416, max_boxes = 20, jitter = .3, hue = .1, sat = 1.5, cont = 1.5, bri = 0.2):
         """

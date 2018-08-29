@@ -29,8 +29,8 @@ def train():
     output = model.yolo_inference(images, config.num_anchors / 3, config.num_classes, is_training)
     loss = model.yolo_loss(output, bbox_true, model.anchors, config.num_classes, config.ignore_thresh)
     tf.summary.scalar('loss', loss)
-    global_step = tf.Variable(0, trainable=False)
-    learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 1000, 0.95, staircase = True)
+    global_step = tf.Variable(0, trainable = False)
+    learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 3000, 0.1)
     optimizer = tf.train.AdamOptimizer(learning_rate = learning_rate)
     # 如果读取预训练权重，则冻结darknet53网络的变量
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -49,11 +49,12 @@ def train():
             saver.restore(sess, ckpt.model_checkpoint_path)
         else:
             sess.run(init)
-        if model.pre_train is True:
+        if config.pre_train is True:
             load_ops = model.load_weights(tf.global_variables(scope = 'darknet53'), config.darknet53_weights_path)
             sess.run(load_ops)
         summary_writer = tf.summary.FileWriter('./logs', sess.graph)
-        tf.train.start_queue_runners(sess = sess)
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess = sess, coord = coord)
         for epoch in range(config.Epoch):
             for step in range(int(config.train_num / config.train_batch_size)):
                 start_time = time.time()
@@ -78,8 +79,9 @@ def train():
             # 每3个epoch保存一次模型
             if epoch % 3 == 0:
                 checkpoint_path = os.path.join(config.model_dir, 'model.ckpt')
-                saver.save(sess, checkpoint_path, global_step = epoch)
-
+                saver.save(sess, checkpoint_path, global_step = global_step)
+        coord.request_stop()
+        coord.join(threads)
 
 
 def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):

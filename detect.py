@@ -167,7 +167,7 @@ def detect(image_path, model_path, yolo_weights = None):
             draw.text(text_origin, label, fill=(0, 0, 0), font=font)
             del draw
         image.show()
-        image.save('./result.jpg')
+        image.save('./result1.jpg')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(argument_default = argparse.SUPPRESS)

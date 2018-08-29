@@ -8,7 +8,7 @@ import tensorflow as tf
 import os
 
 class yolo:
-    def __init__(self, norm_epsilon, norm_decay, anchors_path, classes_path, pre_train = True):
+    def __init__(self, norm_epsilon, norm_decay, anchors_path, classes_path):
         """
         Introduction
         ------------
@@ -22,7 +22,6 @@ class yolo:
             pre_train: 是否使用预训练darknet53模型
         """
         self.norm_epsilon = norm_epsilon
-        self.pre_train = pre_train
         self.norm_decay = norm_decay
         self.anchors_path = anchors_path
         self.classes_path = classes_path

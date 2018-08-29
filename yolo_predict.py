@@ -219,7 +219,7 @@ class yolo_predictor:
             scores: 物体概率值
             classes: 物体类别
         """
-        model = yolo(config.norm_epsilon, config.norm_decay, self.anchors_path, self.classes_path, pre_train = False)
+        model = yolo(config.norm_epsilon, config.norm_decay, self.anchors_path, self.classes_path)
         output = model.yolo_inference(inputs, config.num_anchors // 3, config.num_classes, training = False)
         boxes, scores, classes = self.eval(output, image_shape, max_boxes = 20)
         return boxes, scores, classes

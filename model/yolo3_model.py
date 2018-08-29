@@ -8,7 +8,7 @@ import tensorflow as tf
 import os
 
 class yolo:
-    def __init__(self, norm_epsilon, norm_decay, anchors_path, classes_path):
+    def __init__(self, norm_epsilon, norm_decay, anchors_path, classes_path, pre_train):
         """
         Introduction
         ------------
@@ -25,6 +25,7 @@ class yolo:
         self.norm_decay = norm_decay
         self.anchors_path = anchors_path
         self.classes_path = classes_path
+        self.pre_train = pre_train
         self.anchors = self._get_anchors()
         self.classes = self._get_class()
 

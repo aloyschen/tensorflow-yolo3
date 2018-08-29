@@ -170,7 +170,6 @@ class Reader:
                     cat = cat - 10
                 elif cat >= 84 and cat <= 90:
                     cat = cat - 11
-
                 name_box_id[name].append([ant['bbox'], cat])
 
             for key in name_box_id.keys():

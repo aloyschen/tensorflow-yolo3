@@ -104,14 +104,10 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
         server.join()
     else:
         with tf.device(tf.train.replica_device_setter(worker_device = "/job:worker/task:%d" % task_index, cluster = cluster)):
-            train_data = Reader('train', config.data_dir, config.anchors_path, config.num_classes,
-                                input_shape=config.input_shape, max_boxes=config.max_boxes, jitter=config.jitter,
-                                hue=config.hue, sat=config.sat, cont=config.cont, bri=config.bri)
-            val_data = Reader('val', config.data_dir, config.anchors_path, config.num_classes,
-                              input_shape=config.input_shape, max_boxes=config.max_boxes)
+            train_data = Reader('train', config.data_dir, config.anchors_path, config.num_classes, input_shape=config.input_shape, max_boxes=config.max_boxes, jitter=config.jitter, hue=config.hue, sat=config.sat, cont=config.cont, bri=config.bri)
+            val_data = Reader('val', config.data_dir, config.anchors_path, config.num_classes, input_shape=config.input_shape, max_boxes=config.max_boxes)
             images_train, bbox_true_13_train, bbox_true_26_train, bbox_true_52_train = train_data.provide(config.train_batch_size)
             images_val, bbox_true_13_val, bbox_true_26_val, bbox_true_52_val = val_data.provide(config.val_batch_size)
-
             model = yolo(config.norm_epsilon, config.norm_decay, config.anchors_path, config.classes_path, config.pre_train)
             is_training = tf.placeholder(dtype=tf.bool, shape=[])
             images = tf.placeholder(shape=[None, 416, 416, 3], dtype=tf.float32)
@@ -142,7 +138,7 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
                     saver.restore(sess, ckpt.model_checkpoint_path)
                 else:
                     sess.run(init)
-                if model.pre_train is True:
+                if config.pre_train is True:
                     load_ops = model.load_weights(tf.global_variables(scope='darknet53'), config.darknet53_weights_path)
                     sess.run(load_ops)
                 summary_writer = tf.summary.FileWriter('./logs', sess.graph)

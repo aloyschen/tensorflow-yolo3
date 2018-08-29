@@ -26,7 +26,7 @@ def letterbox_image(image, size):
     new_h = int(image_h * min(w*1.0/image_w, h*1.0/image_h))
     resized_image = image.resize((new_w,new_h), Image.BICUBIC)
 
-    boxed_image = Image.new('RGB', size, (128, 128, 128))
+    boxed_image = Image.new('RGB', size, (0, 0, 0))
     boxed_image.paste(resized_image, ((w-new_w)//2,(h-new_h)//2))
     return boxed_image
 

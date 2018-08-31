@@ -256,7 +256,6 @@ class Reader:
         return image, bbox_true_13, bbox_true_26, bbox_true_52
 
 
-
     def Preprocess(self, image, bbox):
         """
         Introduction
@@ -277,49 +276,38 @@ class Reader:
             scale = tf.random_uniform([], dtype = tf.float32, minval = .25, maxval = 2)
             new_high, new_width = tf.cond(tf.less(new_aspect_ratio, 1), lambda : (scale * input_high, scale * input_high * new_aspect_ratio), lambda : (scale * input_width / new_aspect_ratio, scale * input_width))
             image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
-            # 将图片按照固定长宽比缩放到416*416
             new_high = new_high * tf.minimum(input_width / new_width, input_high / new_high)
-            new_width =new_high * tf.minimum(input_width / new_width, input_high / new_high)
-            dx = tf.cond(tf.greater(input_width - new_width, 0), lambda: tf.divide(tf.subtract(input_width, new_width), 2), lambda: 0.)
-            dy = tf.cond(tf.greater(input_high - new_high, 0), lambda: tf.divide(tf.subtract(input_high, new_high), 2), lambda: 0.)
-            image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
-            image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
+            new_width = new_high * tf.minimum(input_width / new_width, input_high / new_high)
+        else:
+            new_high = image_high * tf.minimum(input_width / image_width, input_high / image_high)
+            new_width = image_width * tf.minimum(input_width / image_width, input_high / image_high)
+        # 将图片按照固定长宽比进行padding缩放
+        dx = tf.cond(tf.greater(input_width - new_width, 0), lambda: tf.divide(tf.subtract(input_width, new_width), 2), lambda: 0.)
+        dy = tf.cond(tf.greater(input_high - new_high, 0), lambda: tf.divide(tf.subtract(input_high, new_high), 2), lambda: 0.)
+        image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
+        new_image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
+        image_ones = tf.ones_like(image)
+        image_ones_padded = tf.image.pad_to_bounding_box(image_ones, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
+        image_color_padded = (1 - image_ones_padded) * 128
+        image = image_color_padded + new_image
+        # 矫正bbox坐标
+        xmin, ymin, xmax, ymax, label = tf.split(value = bbox, num_or_size_splits=5, axis = 1)
+        xmin = xmin * new_width / image_width + dx
+        xmax = xmax * new_width / image_width + dx
+        ymin = ymin * new_high / image_high + dy
+        ymax = ymax * new_high / image_high + dy
+        bbox = tf.concat([xmin, ymin, xmax, ymax, label], 1)
+        if self.mode == 'train':
             # 随机左右翻转图片
-            flip_left_right = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
-            image = tf.cond(flip_left_right, lambda : tf.image.flip_left_right(image), lambda : image)
-
             def _flip_left_right_boxes(boxes):
                 xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis = 1)
                 flipped_xmin = tf.subtract(input_width, xmax)
                 flipped_xmax = tf.subtract(input_width, xmin)
                 flipped_boxes = tf.concat([flipped_xmin, ymin, flipped_xmax, ymax, label], 1)
                 return flipped_boxes
-
-            def _resize_boxes(boxes):
-                xmin, ymin, xmax, ymax, label = tf.split(value = boxes, num_or_size_splits = 5, axis = 1)
-                xmin = xmin * new_width / image_width + dx
-                xmax = xmax * new_width / image_width + dx
-                ymin = ymin * new_high / image_high + dy
-                ymax = ymax * new_high / image_high + dy
-                boxes = tf.concat([xmin, ymin, xmax, ymax, label], 1)
-                return boxes
-
-            # 矫正box坐标
-            bbox = _resize_boxes(bbox)
+            flip_left_right = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
+            image = tf.cond(flip_left_right, lambda : tf.image.flip_left_right(image), lambda : image)
             bbox = tf.cond(flip_left_right, lambda: _flip_left_right_boxes(bbox), lambda: bbox)
-        else:
-            new_high = image_high * tf.minimum(input_width / image_width, input_high / image_high)
-            new_width = image_width * tf.minimum(input_width / image_width, input_high / image_high)
-            dx = tf.divide(tf.subtract(input_width, new_width), 2)
-            dy = tf.divide(tf.subtract(input_high, new_high), 2)
-            image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
-            image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
-            xmin, ymin, xmax, ymax, label = tf.split(value = bbox, num_or_size_splits = 5, axis = 1)
-            xmin = xmin * new_width / image_width + dx
-            xmax = xmax * new_width / image_width + dx
-            ymin = ymin * new_high / image_high + dy
-            ymax = ymax * new_high / image_high + dy
-            bbox = tf.concat([xmin, ymin, xmax, ymax, label], 1)
 
         # 将图片归一化到0和1之间
         image = image / 255.

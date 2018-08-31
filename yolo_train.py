@@ -119,7 +119,7 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
             loss = model.yolo_loss(output, bbox_true, model.anchors, config.num_classes, config.ignore_thresh)
             tf.summary.scalar('loss', loss)
             global_step = tf.Variable(0, trainable=False)
-            learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 1000, 0.95, staircase=True)
+            learning_rate = tf.train.exponential_decay(config.learning_rate, global_step, 20000, 0.1, staircase=True)
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
             # 如果读取预训练权重，则冻结darknet53网络的变量
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -148,32 +148,22 @@ def dstributed_train(ps_hosts, worker_hosts, job_name, task_index):
                         start_time = time.time()
                         images_value, bbox_true_13_value, bbox_true_26_value, bbox_true_52_value = sess.run(
                             [images_train, bbox_true_13_train, bbox_true_26_train, bbox_true_52_train])
-                        train_loss, _ = sess.run([loss, train_op],
-                                                 {images: images_value, bbox_true_13: bbox_true_13_value,
-                                                  bbox_true_26: bbox_true_26_value, bbox_true_52: bbox_true_52_value,
-                                                  is_training: True})
+                        train_loss, _ = sess.run([loss, train_op], {images: images_value, bbox_true_13: bbox_true_13_value, bbox_true_26: bbox_true_26_value, bbox_true_52: bbox_true_52_value, is_training: True})
                         duration = time.time() - start_time
                         examples_per_sec = float(duration) / config.train_batch_size
                         format_str = ('Epoch {} step {},  train loss = {} ( {} examples/sec; {} ''sec/batch)')
                         print(format_str.format(epoch, step, train_loss, examples_per_sec, duration))
-                        summary_writer.add_summary(
-                            summary=tf.Summary(value=[tf.Summary.Value(tag="train loss", simple_value=train_loss)]),
-                            global_step=step)
+                        summary_writer.add_summary(summary=tf.Summary(value=[tf.Summary.Value(tag="train loss", simple_value=train_loss)]), global_step=step)
                         summary_writer.flush()
                     for step in range(int(config.val_num / config.val_batch_size)):
                         start_time = time.time()
-                        images_value, bbox_true_13_value, bbox_true_26_value, bbox_true_52_value = sess.run(
-                            [images_val, bbox_true_13_val, bbox_true_26_val, bbox_true_52_val])
-                        val_loss = sess.run(loss, {images: images_value, bbox_true_13: bbox_true_13_value,
-                                                   bbox_true_26: bbox_true_26_value, bbox_true_52: bbox_true_52_value,
-                                                   is_training: False})
+                        images_value, bbox_true_13_value, bbox_true_26_value, bbox_true_52_value = sess.run([images_val, bbox_true_13_val, bbox_true_26_val, bbox_true_52_val])
+                        val_loss = sess.run(loss, {images: images_value, bbox_true_13: bbox_true_13_value, bbox_true_26: bbox_true_26_value, bbox_true_52: bbox_true_52_value, is_training: False})
                         duration = time.time() - start_time
                         examples_per_sec = float(duration) / config.val_batch_size
                         format_str = ('Epoch {} step {}, val loss = {} ({} examples/sec; {} ''sec/batch)')
                         print(format_str.format(epoch, step, val_loss, examples_per_sec, duration))
-                        summary_writer.add_summary(
-                            summary=tf.Summary(value=[tf.Summary.Value(tag="val loss", simple_value=val_loss)]),
-                            global_step=step)
+                        summary_writer.add_summary(summary = tf.Summary(value=[tf.Summary.Value(tag = "val loss", simple_value = val_loss)]), global_step = step)
                         summary_writer.flush()
                     # 每3个epoch保存一次模型
                     if epoch % 3 == 0:

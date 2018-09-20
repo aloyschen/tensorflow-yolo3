@@ -57,72 +57,9 @@ class yolo:
         anchors = [float(x) for x in anchors.split(',')]
         return np.array(anchors).reshape(-1, 2)
 
-    def load_weights(self, var_list, weights_file):
-        """
-        Introduction
-        ------------
-            加载预训练好的darknet53权重文件
-        Parameters
-        ----------
-            var_list: 赋值变量名
-            weights_file: 权重文件
-        Returns
-        -------
-            assign_ops: 赋值更新操作
-        """
-        with open(weights_file, "rb") as fp:
-            _ = np.fromfile(fp, dtype=np.int32, count=5)
-
-            weights = np.fromfile(fp, dtype=np.float32)
-
-        ptr = 0
-        i = 0
-        assign_ops = []
-        while i < len(var_list) - 1:
-            var1 = var_list[i]
-            var2 = var_list[i + 1]
-            # do something only if we process conv layer
-            if 'conv2d' in var1.name.split('/')[-2]:
-                # check type of next layer
-                if 'batch_normalization' in var2.name.split('/')[-2]:
-                    # load batch norm params
-                    gamma, beta, mean, var = var_list[i + 1:i + 5]
-                    batch_norm_vars = [beta, gamma, mean, var]
-                    for var in batch_norm_vars:
-                        shape = var.shape.as_list()
-                        num_params = np.prod(shape)
-                        var_weights = weights[ptr:ptr + num_params].reshape(shape)
-                        ptr += num_params
-                        assign_ops.append(tf.assign(var, var_weights, validate_shape=True))
-
-                    # we move the pointer by 4, because we loaded 4 variables
-                    i += 4
-                elif 'conv2d' in var2.name.split('/')[-2]:
-                    # load biases
-                    bias = var2
-                    bias_shape = bias.shape.as_list()
-                    bias_params = np.prod(bias_shape)
-                    bias_weights = weights[ptr:ptr + bias_params].reshape(bias_shape)
-                    ptr += bias_params
-                    assign_ops.append(tf.assign(bias, bias_weights, validate_shape=True))
-
-                    # we loaded 1 variable
-                    i += 1
-                # we can load weights of conv layer
-                shape = var1.shape.as_list()
-                num_params = np.prod(shape)
-
-                var_weights = weights[ptr:ptr + num_params].reshape((shape[3], shape[2], shape[0], shape[1]))
-                # remember to transpose to column-major
-                var_weights = np.transpose(var_weights, (2, 3, 1, 0))
-                ptr += num_params
-                assign_ops.append(tf.assign(var1, var_weights, validate_shape=True))
-                i += 1
-
-        return assign_ops
 
 
-    def _batch_normalization_layer(self, input_layer, name = None, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _batch_normalization_layer(self, input_layer, name = None, training = True, norm_decay = 0.99, norm_epsilon = 1e-3):
         '''
         Introduction
         ------------
@@ -140,7 +77,7 @@ class yolo:
         '''
         bn_layer = tf.layers.batch_normalization(inputs = input_layer,
             momentum = norm_decay, epsilon = norm_epsilon, center = True,
-            scale = True, training = training, name = name, fused = False)
+            scale = True, training = training, name = name)
         return tf.nn.leaky_relu(bn_layer, alpha = 0.1)
 
 
@@ -170,14 +107,13 @@ class yolo:
             # 在输入feature map的长宽维度进行padding
             inputs = tf.pad(inputs, paddings = [[0, 0], [1, 0], [1, 0], [0, 0]], mode = 'CONSTANT')
         conv = tf.layers.conv2d(
-        inputs = inputs, filters = filters_num,
-        kernel_size = kernel_size, strides = [strides, strides],
-        padding = ('SAME' if strides == 1 else 'VALID'),
-        use_bias = use_bias, kernel_initializer = tf.contrib.layers.xavier_initializer(), name = name)
+            inputs = inputs, filters = filters_num,
+            kernel_size = kernel_size, strides = [strides, strides], kernel_initializer = tf.glorot_uniform_initializer(),
+            padding = ('SAME' if strides == 1 else 'VALID'), kernel_regularizer = tf.contrib.layers.l2_regularizer(scale = 5e-4), use_bias = use_bias, name = name)
         return conv
 
 
-    def _Residual_block(self, inputs, filters_num, blocks_num, conv_index, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _Residual_block(self, inputs, filters_num, blocks_num, conv_index, training = True, norm_decay = 0.99, norm_epsilon = 1e-3):
         """
         Introduction
         ------------
@@ -212,7 +148,7 @@ class yolo:
         return layer, conv_index
 
 
-    def _darknet53(self, inputs, conv_index, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _darknet53(self, inputs, conv_index, training = True, norm_decay = 0.99, norm_epsilon = 1e-3):
         """
         Introduction
         ------------
@@ -232,7 +168,7 @@ class yolo:
             route2: 返回第43层卷积计算结果26x26x512, 供后续使用
             conv_index: 卷积层计数，方便在加载预训练模型时使用
         """
-        with tf.variable_scope('darknet53') as scope:
+        with tf.variable_scope('darknet53'):
             conv = self._conv2d_layer(inputs, filters_num = 32, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
             conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
             conv_index += 1
@@ -246,7 +182,7 @@ class yolo:
         return  route1, route2, conv, conv_index
 
 
-    def _yolo_block(self, inputs, filters_num, out_filters, conv_index, training = True, norm_decay = 0.997, norm_epsilon = 1e-5):
+    def _yolo_block(self, inputs, filters_num, out_filters, conv_index, training = True, norm_decay = 0.99, norm_epsilon = 1e-3):
         """
         Introduction
         ------------
@@ -267,23 +203,23 @@ class yolo:
             conv_index: conv层计数
         """
         conv = self._conv2d_layer(inputs, filters_num = filters_num, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
-        conv = self._batch_normalization_layer(conv, name="batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
-        conv_index += 1
-        conv = self._conv2d_layer(conv, filters_num = filters_num * 2, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
-        conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
-        conv_index += 1
-        conv = self._conv2d_layer(conv, filters_num = filters_num, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
         conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
         conv = self._conv2d_layer(conv, filters_num = filters_num * 2, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
         conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
         conv = self._conv2d_layer(conv, filters_num = filters_num, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
-        conv = self._batch_normalization_layer(conv, name="batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+        conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+        conv_index += 1
+        conv = self._conv2d_layer(conv, filters_num = filters_num * 2, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
+        conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+        conv_index += 1
+        conv = self._conv2d_layer(conv, filters_num = filters_num, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
+        conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
         route = conv
         conv = self._conv2d_layer(conv, filters_num = filters_num * 2, kernel_size = 3, strides = 1, name = "conv2d_" + str(conv_index))
-        conv = self._batch_normalization_layer(conv, name="batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
+        conv = self._batch_normalization_layer(conv, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
         conv = self._conv2d_layer(conv, filters_num = out_filters, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index), use_bias = True)
         conv_index += 1
@@ -313,7 +249,7 @@ class yolo:
             route0 = tf.concat([unSample_0, conv2d_45], axis = -1, name = 'route_0')
             conv2d_65, conv2d_67, conv_index = self._yolo_block(route0, 256, num_anchors * (num_classes + 5), conv_index = conv_index, training = training,norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv2d_68 = self._conv2d_layer(conv2d_65, filters_num = 128, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
-            conv2d_68 = self._batch_normalization_layer(conv2d_68,name="batch_normalization_" + str(conv_index), training=training, norm_decay=self.norm_decay, norm_epsilon = self.norm_epsilon)
+            conv2d_68 = self._batch_normalization_layer(conv2d_68, name = "batch_normalization_" + str(conv_index), training=training, norm_decay=self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv_index += 1
             unSample_1 = tf.image.resize_nearest_neighbor(conv2d_68, [2 * tf.shape(conv2d_68)[1], 2 * tf.shape(conv2d_68)[1]], name='upSample_1')
             route1 = tf.concat([unSample_1, conv2d_26], axis = -1, name = 'route_1')

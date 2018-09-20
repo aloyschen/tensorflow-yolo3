@@ -5,9 +5,8 @@ import tensorflow as tf
 import numpy as np
 from collections import defaultdict
 
-
 class Reader:
-    def __init__(self, mode, data_dir, anchors_path, num_classes, input_shape = 416, max_boxes = 20, jitter = .3, hue = .1, sat = 1.5, cont = 1.5, bri = 0.2):
+    def __init__(self, mode, data_dir, anchors_path, num_classes, tfrecord_num = 1, input_shape = 416, max_boxes = 20):
         """
         Introduction
         ------------
@@ -29,21 +28,16 @@ class Reader:
         self.data_dir = data_dir
         self.input_shape = input_shape
         self.max_boxes = max_boxes
-        self.jitter = jitter
-        self.hue = hue
-        self.sat = sat
-        self.cont = cont
-        self.bri = bri
         self.mode = mode
         self.annotations_file = {'train' : config.train_annotations_file, 'val' : config.val_annotations_file}
         self.data_file = {'train': config.train_data_file, 'val': config.val_data_file}
         self.anchors_path = anchors_path
         self.anchors = self._get_anchors()
         self.num_classes = num_classes
-        self.TfrecordFile = os.path.join(self.data_dir, self.mode + '.tfrecords')
-        if not os.path.exists(self.TfrecordFile):
-            self.convert_to_tfrecord(self.data_dir)
-
+        file_pattern = self.data_dir + "/*" + self.mode + '.tfrecords'
+        self.TfrecordFile = tf.gfile.Glob(file_pattern)
+        if len(self.TfrecordFile) == 0:
+            self.convert_to_tfrecord(self.data_dir, tfrecord_num)
 
     def _get_anchors(self):
         """
@@ -84,7 +78,7 @@ class Reader:
         ----------
             true_boxes: ground truth box 形状为[boxes, 5], x_min, y_min, x_max, y_max, class_id
         """
-        num_layers = self.anchors.shape[0] // 3
+        num_layers = len(self.anchors) // 3
         anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
         true_boxes = np.array(true_boxes, dtype='float32')
         input_shape = np.array([self.input_shape, self.input_shape], dtype='int32')
@@ -145,7 +139,7 @@ class Reader:
         image_data = []
         boxes_data = []
         name_box_id = defaultdict(list)
-        with open(self.annotations_file[self.mode], encoding = 'utf-8') as file:
+        with open(self.annotations_file[self.mode], encoding='utf-8') as file:
             data = json.load(file)
             annotations = data['annotations']
             for ant in annotations:
@@ -187,7 +181,7 @@ class Reader:
         return image_data, boxes_data
 
 
-    def convert_to_tfrecord(self, tfrecord_path):
+    def convert_to_tfrecord(self, tfrecord_path, num_tfrecords):
         """
         Introduction
         ------------
@@ -195,33 +189,36 @@ class Reader:
         Parameters
         ----------
             tfrecord_path: tfrecord文件存储路径
+            num_tfrecords: 分成多少个tfrecord
         """
-        output_file = os.path.join(tfrecord_path, self.mode + '.tfrecords')
         image_data, boxes_data = self.read_annotations()
-        with tf.python_io.TFRecordWriter(output_file) as record_writer:
-            for index in range(len(image_data)):
-                with tf.gfile.FastGFile(image_data[index], 'rb') as file:
-                    image = file.read()
-                    xmin, xmax, ymin, ymax, label = [], [], [], [], []
-                    for box in boxes_data[index]:
-                        xmin.append(box[0])
-                        ymin.append(box[1])
-                        xmax.append(box[2])
-                        ymax.append(box[3])
-                        label.append(box[4])
-                    example = tf.train.Example(features = tf.train.Features(
-                        feature = {
-                            'image/encoded' : tf.train.Feature(bytes_list = tf.train.BytesList(value = [image])),
-                            'image/object/bbox/xmin' : tf.train.Feature(float_list = tf.train.FloatList(value = xmin)),
-                            'image/object/bbox/xmax': tf.train.Feature(float_list = tf.train.FloatList(value = xmax)),
-                            'image/object/bbox/ymin': tf.train.Feature(float_list = tf.train.FloatList(value = ymin)),
-                            'image/object/bbox/ymax': tf.train.Feature(float_list = tf.train.FloatList(value = ymax)),
-                            'image/object/bbox/label': tf.train.Feature(float_list = tf.train.FloatList(value = label)),
-                        }
-                    ))
-                    record_writer.write(example.SerializeToString())
-                    if index % 1000 == 0:
-                        print('Processed {} of {} images'.format(index + 1, len(image_data)))
+        images_num = int(len(image_data) / num_tfrecords)
+        for index_records in range(num_tfrecords):
+            output_file = os.path.join(tfrecord_path, str(index_records) + '_' + self.mode + '.tfrecords')
+            with tf.python_io.TFRecordWriter(output_file) as record_writer:
+                for index in range(index_records * images_num, (index_records + 1) * images_num):
+                    with tf.gfile.FastGFile(image_data[index], 'rb') as file:
+                        image = file.read()
+                        xmin, xmax, ymin, ymax, label = [], [], [], [], []
+                        for box in boxes_data[index]:
+                            xmin.append(box[0])
+                            ymin.append(box[1])
+                            xmax.append(box[2])
+                            ymax.append(box[3])
+                            label.append(box[4])
+                        example = tf.train.Example(features = tf.train.Features(
+                            feature = {
+                                'image/encoded' : tf.train.Feature(bytes_list = tf.train.BytesList(value = [image])),
+                                'image/object/bbox/xmin' : tf.train.Feature(float_list = tf.train.FloatList(value = xmin)),
+                                'image/object/bbox/xmax': tf.train.Feature(float_list = tf.train.FloatList(value = xmax)),
+                                'image/object/bbox/ymin': tf.train.Feature(float_list = tf.train.FloatList(value = ymin)),
+                                'image/object/bbox/ymax': tf.train.Feature(float_list = tf.train.FloatList(value = ymax)),
+                                'image/object/bbox/label': tf.train.Feature(float_list = tf.train.FloatList(value = label)),
+                            }
+                        ))
+                        record_writer.write(example.SerializeToString())
+                        if index % 1000 == 0:
+                            print('Processed {} of {} images'.format(index + 1, len(image_data)))
 
 
     def parser(self, serialized_example):
@@ -245,6 +242,7 @@ class Reader:
             }
         )
         image = tf.image.decode_jpeg(features['image/encoded'], channels = 3)
+        image = tf.image.convert_image_dtype(image, tf.uint8)
         xmin = tf.expand_dims(features['image/object/bbox/xmin'].values, axis = 0)
         ymin = tf.expand_dims(features['image/object/bbox/ymin'].values, axis = 0)
         xmax = tf.expand_dims(features['image/object/bbox/xmax'].values, axis = 0)
@@ -252,9 +250,9 @@ class Reader:
         label = tf.expand_dims(features['image/object/bbox/label'].values, axis = 0)
         bbox = tf.concat(axis = 0, values = [xmin, ymin, xmax, ymax, label])
         bbox = tf.transpose(bbox, [1, 0])
-        image, bbox_true_13, bbox_true_26, bbox_true_52 = self.Preprocess(image, bbox)
-        return image, bbox_true_13, bbox_true_26, bbox_true_52
-
+        image, bbox = self.Preprocess(image, bbox)
+        bbox_true_13, bbox_true_26, bbox_true_52 = tf.py_func(self.Preprocess_true_boxes, [bbox], [tf.float32, tf.float32, tf.float32])
+        return image, bbox, bbox_true_13, bbox_true_26, bbox_true_52
 
     def Preprocess(self, image, bbox):
         """
@@ -269,22 +267,12 @@ class Reader:
         image_width, image_high = tf.cast(tf.shape(image)[1], tf.float32), tf.cast(tf.shape(image)[0], tf.float32)
         input_width = tf.cast(self.input_shape, tf.float32)
         input_high = tf.cast(self.input_shape, tf.float32)
-        if self.mode == 'train':
-            # 随机长宽比
-            new_aspect_ratio = tf.random_uniform([], dtype = tf.float32, minval = 1 - self.jitter, maxval = 1 + self.jitter)
-            # 图片随机缩放比例
-            scale = tf.random_uniform([], dtype = tf.float32, minval = .25, maxval = 2)
-            new_high, new_width = tf.cond(tf.less(new_aspect_ratio, 1), lambda : (scale * input_high, scale * input_high * new_aspect_ratio), lambda : (scale * input_width / new_aspect_ratio, scale * input_width))
-            image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
-            new_high = new_high * tf.minimum(input_width / new_width, input_high / new_high)
-            new_width = new_high * tf.minimum(input_width / new_width, input_high / new_high)
-        else:
-            new_high = image_high * tf.minimum(input_width / image_width, input_high / image_high)
-            new_width = image_width * tf.minimum(input_width / image_width, input_high / image_high)
+        new_high = image_high * tf.minimum(input_width / image_width, input_high / image_high)
+        new_width = image_width * tf.minimum(input_width / image_width, input_high / image_high)
         # 将图片按照固定长宽比进行padding缩放
-        dx = tf.cond(tf.greater(input_width - new_width, 0), lambda: tf.divide(tf.subtract(input_width, new_width), 2), lambda: 0.)
-        dy = tf.cond(tf.greater(input_high - new_high, 0), lambda: tf.divide(tf.subtract(input_high, new_high), 2), lambda: 0.)
-        image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)])
+        dx = (input_width - new_width) / 2
+        dy = (input_high - new_high) / 2
+        image = tf.image.resize_images(image, [tf.cast(new_high, tf.int32), tf.cast(new_width, tf.int32)], method = tf.image.ResizeMethod.BICUBIC)
         new_image = tf.image.pad_to_bounding_box(image, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
         image_ones = tf.ones_like(image)
         image_ones_padded = tf.image.pad_to_bounding_box(image_ones, tf.cast(dy, tf.int32), tf.cast(dx, tf.int32), tf.cast(input_high, tf.int32), tf.cast(input_width, tf.int32))
@@ -308,34 +296,19 @@ class Reader:
             flip_left_right = tf.greater(tf.random_uniform([], dtype = tf.float32, minval = 0, maxval = 1), 0.5)
             image = tf.cond(flip_left_right, lambda : tf.image.flip_left_right(image), lambda : image)
             bbox = tf.cond(flip_left_right, lambda: _flip_left_right_boxes(bbox), lambda: bbox)
-
         # 将图片归一化到0和1之间
         image = image / 255.
         image = tf.clip_by_value(image, clip_value_min = 0.0, clip_value_max = 1.0)
         bbox = tf.clip_by_value(bbox, clip_value_min = 0, clip_value_max = input_width - 1)
-        bbox = tf.cond(tf.greater(tf.shape(bbox)[0], 20), lambda: bbox[:20], lambda: tf.pad(bbox, paddings = [[0, 20 - tf.shape(bbox)[0]], [0, 0]], mode = 'CONSTANT'))
-        bbox_true_13, bbox_true_26, bbox_true_52 = tf.py_func(self.Preprocess_true_boxes, [bbox], [tf.float32, tf.float32, tf.float32])
-        return image, bbox_true_13, bbox_true_26, bbox_true_52
+        bbox = tf.cond(tf.greater(tf.shape(bbox)[0], config.max_boxes), lambda: bbox[:config.max_boxes], lambda: tf.pad(bbox, paddings = [[0, config.max_boxes - tf.shape(bbox)[0]], [0, 0]], mode = 'CONSTANT'))
+        return image, bbox
 
-
-    def provide(self, batch_size):
-        """
-        Introduction
-        ------------
-            使用队列构建数据集
-        Parameters
-        ----------
-            batch_size: batch的大小
-        """
-        filename_queue = tf.train.string_input_producer([self.TfrecordFile])
-        reader = tf.TFRecordReader()
-        _, serialized_example = reader.read(filename_queue)
-        image, bbox_true_13, bbox_true_26, bbox_true_52 = self.parser(serialized_example)
-        grid_shapes = [self.input_shape // 32, self.input_shape // 16, self.input_shape // 8]
-        image.set_shape([self.input_shape, self.input_shape, 3])
-        bbox_true_13.set_shape([grid_shapes[0], grid_shapes[0], 3, 5 + self.num_classes])
-        bbox_true_26.set_shape([grid_shapes[1], grid_shapes[1], 3, 5 + self.num_classes])
-        bbox_true_52.set_shape([grid_shapes[2], grid_shapes[2], 3, 5 + self.num_classes])
-        images, bboxes_true_13, bboxes_true_26, bboxes_true_52 = tf.train.shuffle_batch([image, bbox_true_13, bbox_true_26, bbox_true_52], batch_size = batch_size, capacity = 20 * batch_size, num_threads = 10, min_after_dequeue = 10 * batch_size)
-        return images, bboxes_true_13, bboxes_true_26, bboxes_true_52
-
+    def build_dataset(self, batch_size):
+        dataset = tf.data.TFRecordDataset(filenames = self.TfrecordFile)
+        dataset = dataset.map(self.parser, num_parallel_calls = 10)
+        if self.mode == 'train':
+            dataset = dataset.apply(tf.contrib.data.shuffle_and_repeat(100))
+            dataset = dataset.batch(batch_size).prefetch(batch_size)
+        else:
+            dataset = dataset.repeat().batch(batch_size).prefetch(batch_size)
+        return dataset

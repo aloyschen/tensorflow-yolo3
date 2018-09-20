@@ -198,7 +198,8 @@ def eval(model_path, min_Iou = 0.5, yolo_weights = None):
 
         ap, mrec, mprec = voc_ap(rec, prec)
         sum_AP += ap
-    print("The Model Eval MAP: {}".format(sum_AP))
+    MAP = sum_AP / len(gt_counter_per_class) * 100
+    print("The Model Eval MAP: {}".format(MAP))
 
 if __name__ == "__main__":
     train()

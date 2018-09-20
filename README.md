@@ -40,6 +40,10 @@ wget https://pjreddie.com/media/files/darknet53.conv.74`
 ```
 python detect.py --image_file ./test.jpg
 ```
+
+## Train Image show on Tensorboard
+![train](https://github.com/aloyschen/tensorflow-yolo3/blob/master/model_data/TrainImage.png)   
+
 ## Notice
 
 If you want to modify the Gpu index, please modify gpu_index in config.py

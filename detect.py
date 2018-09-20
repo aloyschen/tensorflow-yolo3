@@ -1,3 +1,4 @@
+import os
 import config
 import argparse
 import numpy as np
@@ -6,6 +7,8 @@ from yolo_predict import yolo_predictor
 from PIL import Image, ImageFont, ImageDraw
 from utils import letterbox_image, load_weights
 
+# 指定使用GPU的Index
+os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_index
 
 def detect(image_path, model_path, yolo_weights = None):
     """

@@ -223,4 +223,3 @@ class yolo_predictor:
         output = model.yolo_inference(inputs, config.num_anchors // 3, config.num_classes, training = False)
         boxes, scores, classes = self.eval(output, image_shape, max_boxes = 20)
         return boxes, scores, classes
-

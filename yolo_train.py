@@ -10,6 +10,8 @@ from collections import defaultdict
 from yolo_predict import yolo_predictor
 from utils import draw_box, load_weights, letterbox_image, voc_ap
 
+# 指定使用GPU的Index
+os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_index
 
 def train():
     """
@@ -17,8 +19,6 @@ def train():
     ------------
         训练模型
     """
-    # 指定使用GPU的Index
-    os.environ["CUDA_VISIBLE_DEVICES"] = config.gpu_index
     train_reader = Reader('train', config.data_dir, config.anchors_path, config.num_classes, input_shape = config.input_shape, max_boxes = config.max_boxes)
     train_data = train_reader.build_dataset(config.train_batch_size)
     is_training = tf.placeholder(tf.bool, shape = [])
@@ -76,16 +76,13 @@ def train():
                 summary_writer.add_summary(summary = tf.Summary(value = [tf.Summary.Value(tag = "train loss", simple_value = train_loss)]), global_step = step)
                 summary_writer.add_summary(summary, step)
                 summary_writer.flush()
-            if epoch % 3 == 0:
-                mAP = eval(config.val_data, sess, output, model.classes, is_training)
-                print("Epoch: {}, Test Total MAP: {}".format(epoch, mAP))
             # 每3个epoch保存一次模型
             if epoch % 3 == 0:
                 checkpoint_path = os.path.join(config.model_dir, 'model.ckpt')
                 saver.save(sess, checkpoint_path, global_step = global_step)
 
 
-def eval(val_annotation_path, sess, output, class_names, is_training, min_Iou = 0.5):
+def eval(model_path, min_Iou = 0.5, yolo_weights = None):
     """
     Introduction
     ------------
@@ -98,45 +95,54 @@ def eval(val_annotation_path, sess, output, class_names, is_training, min_Iou = 
     input_image_shape = tf.placeholder(dtype = tf.int32, shape = (2,))
     input_image = tf.placeholder(shape = [None, 416, 416, 3], dtype = tf.float32)
     predictor = yolo_predictor(config.obj_threshold, config.nms_threshold, config.classes_path, config.anchors_path)
-    boxes, scores, classes = predictor.eval(output, input_image_shape, max_boxes=20)
-    with open(val_annotation_path) as file:
-        val_lines = file.readlines()
-    for line in val_lines:
-        image_file, *bboxes = line.split()
-        file_id = os.path.split(image_file)[-1].split('.')[0]
-        for bbox in bboxes:
-            top, left, bottom, right, class_id = bbox.split(',')
-            class_name = class_names[int(class_id)]
-            bbox = [float(left), float(top), float(right), float(bottom)]
-            val_bboxes.append({"class_name" : class_name, "bbox": bbox, "used": False})
-            gt_counter_per_class[class_name] += 1
-        ground_truth[file_id] = val_bboxes
-        image = Image.open(image_file)
-        resize_image = letterbox_image(image, (416, 416))
-        image_data = np.array(resize_image, dtype = np.float32)
-        image_data /= 255.
-        image_data = np.expand_dims(image_data, axis = 0)
+    boxes, scores, classes = predictor.predict(input_image, input_image_shape)
+    val_Reader = Reader("val", config.data_dir, config.anchors_path, config.num_classes, input_shape = config.input_shape, max_boxes = config.max_boxes)
+    image_files, bboxes_data = val_Reader.read_annotations()
+    with tf.Session() as sess:
+        if yolo_weights is not None:
+            with tf.variable_scope('predict'):
+                boxes, scores, classes = predictor.predict(input_image, input_image_shape)
+            load_op = load_weights(tf.global_variables(scope = 'predict'), weights_file = yolo_weights)
+            sess.run(load_op)
+        else:
+            saver = tf.train.Saver()
+            saver.restore(sess, model_path)
+        for index in range(len(image_files)):
+            image_file = image_files[index]
+            file_id = os.path.split(image_file)[-1].split('.')[0]
+            for bbox in bboxes_data[index]:
+                top, left, bottom, right, class_id = bbox[0], bbox[1], bbox[2], bbox[3], bbox[4]
+                class_name = val_Reader.class_names[int(class_id)]
+                bbox = [float(left), float(top), float(right), float(bottom)]
+                val_bboxes.append({"class_name" : class_name, "bbox": bbox, "used": False})
+                gt_counter_per_class[class_name] += 1
+            ground_truth[file_id] = val_bboxes
+            image = Image.open(image_file)
+            resize_image = letterbox_image(image, (416, 416))
+            image_data = np.array(resize_image, dtype = np.float32)
+            image_data /= 255.
+            image_data = np.expand_dims(image_data, axis = 0)
 
-        out_boxes, out_scores, out_classes = sess.run(
-            [boxes, scores, classes],
-            feed_dict = {
-                is_training : True,
-                input_image : image_data,
-                input_image_shape : [image.size[1], image.size[0]]
-            })
-        for o, c in enumerate(out_classes):
-            predicted_class = class_names[c]
-            box = out_boxes[o]
-            score = out_scores[o]
+            out_boxes, out_scores, out_classes = sess.run(
+                [boxes, scores, classes],
+                feed_dict = {
+                    input_image : image_data,
+                    input_image_shape : [image.size[1], image.size[0]]
+                })
+            print("detect {}/{} found boxes: {}".format(index, len(image_files), len(out_boxes)))
+            for o, c in enumerate(out_classes):
+                predicted_class = val_Reader.class_names[c]
+                box = out_boxes[o]
+                score = out_scores[o]
 
-            top, left, bottom, right = box
-            top = max(0, np.floor(top + 0.5).astype('int32'))
-            left = max(0, np.floor(left + 0.5).astype('int32'))
-            bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-            right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
+                top, left, bottom, right = box
+                top = max(0, np.floor(top + 0.5).astype('int32'))
+                left = max(0, np.floor(left + 0.5).astype('int32'))
+                bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
+                right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
 
-            bbox = [left, top, right, bottom]
-            class_pred[predicted_class].append({"confidence": str(score), "file_id": file_id, "bbox": bbox})
+                bbox = [left, top, right, bottom]
+                class_pred[predicted_class].append({"confidence": str(score), "file_id": file_id, "bbox": bbox})
 
     # 计算每个类别的AP
     sum_AP = 0.0
@@ -192,10 +198,12 @@ def eval(val_annotation_path, sess, output, class_names, is_training, min_Iou = 
 
         ap, mrec, mprec = voc_ap(rec, prec)
         sum_AP += ap
-    return sum_AP
+    print("The Model Eval MAP: {}".format(sum_AP))
 
 if __name__ == "__main__":
     train()
+    # 计算模型的Map
+    # eval(config.model_dir, yolo_weights = config.yolo3_weights_path)
 
 
 

@@ -1,8 +1,8 @@
-import os
 import json
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+from collections import defaultdict
 
 def load_weights(var_list, weights_file):
     """
@@ -91,42 +91,6 @@ def letterbox_image(image, size):
     boxed_image = Image.new('RGB', size, (128, 128, 128))
     boxed_image.paste(resized_image, ((w-new_w)//2,(h-new_h)//2))
     return boxed_image
-
-def get_config_from_env():
-    """
-    Introduction
-    ------------
-        通过环境变量，读取分布式训练配置参数
-    """
-    tf_config = json.loads(os.environ.get('TF_CONFIG') or '{}')
-    print("TF_CONFIG:%s" % (os.environ.get('TF_CONFIG')))
-    task_config = tf_config.get('task', {})
-    job_name = task_config.get('type')
-    task_index = task_config.get('index')
-    cluster_config = tf_config.get('cluster', {})
-    ps_hosts = cluster_config.get('ps')
-    worker_hosts = cluster_config.get('worker')
-    return ps_hosts, worker_hosts, job_name, task_index
-
-
-def _get_session_config_from_env_var():
-  """Returns a tf.ConfigProto instance that has appropriate device_filters set.
-  """
-
-  tf_config = json.loads(os.environ.get('TF_CONFIG', '{}'))
-
-  if (tf_config and 'task' in tf_config and 'type' in tf_config['task'] and
-      'index' in tf_config['task']):
-    # Master should only communicate with itself and ps
-    if tf_config['task']['type'] == 'master':
-      return tf.ConfigProto(device_filters=['/job:ps', '/job:master'])
-    # Worker should only communicate with itself and ps
-    elif tf_config['task']['type'] == 'worker':
-      return tf.ConfigProto(device_filters=[
-          '/job:ps',
-          '/job:worker/task:%d' % tf_config['task']['index']
-      ])
-  return None
 
 
 def draw_box(image, bbox):

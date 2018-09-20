@@ -36,6 +36,7 @@ class Reader:
         self.num_classes = num_classes
         file_pattern = self.data_dir + "/*" + self.mode + '.tfrecords'
         self.TfrecordFile = tf.gfile.Glob(file_pattern)
+        self.class_names = self._get_class(config.classes_path)
         if len(self.TfrecordFile) == 0:
             self.convert_to_tfrecord(self.data_dir, tfrecord_num)
 
@@ -131,7 +132,7 @@ class Reader:
         """
         Introduction
         ------------
-            读取数据集图片路径和对应的标注
+            读取COCO数据集图片路径和对应的标注
         Parameters
         ----------
             data_file: 文件路径
@@ -303,7 +304,19 @@ class Reader:
         bbox = tf.cond(tf.greater(tf.shape(bbox)[0], config.max_boxes), lambda: bbox[:config.max_boxes], lambda: tf.pad(bbox, paddings = [[0, config.max_boxes - tf.shape(bbox)[0]], [0, 0]], mode = 'CONSTANT'))
         return image, bbox
 
+
     def build_dataset(self, batch_size):
+        """
+        Introduction
+        ------------
+            建立数据集dataset
+        Parameters
+        ----------
+            batch_size: batch大小
+        Return
+        ------
+            dataset: 返回tensorflow的dataset
+        """
         dataset = tf.data.TFRecordDataset(filenames = self.TfrecordFile)
         dataset = dataset.map(self.parser, num_parallel_calls = 10)
         if self.mode == 'train':

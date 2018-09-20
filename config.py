@@ -26,7 +26,6 @@ log_dir = './logs'
 data_dir = './model_data'
 model_dir = './test_model/model.ckpt-200488'
 pre_train_yolo3 = True
-val_data = './model_data/val.txt'
 yolo3_weights_path = './model_data/yolov3.weights'
 darknet53_weights_path = './model_data/darknet53.weights'
 anchors_path = './model_data/yolo_anchors.txt'

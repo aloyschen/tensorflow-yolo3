@@ -46,7 +46,7 @@ def train():
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         if config.pre_train:
-            train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo/final')
+            train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
             train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list = train_var)
         else:
             train_op = optimizer.minimize(loss = loss, global_step = global_step)

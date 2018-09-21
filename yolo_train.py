@@ -46,7 +46,7 @@ def train():
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         if config.pre_train:
-            train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo')
+            train_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='yolo/final')
             train_op = optimizer.minimize(loss = loss, global_step = global_step, var_list = train_var)
         else:
             train_op = optimizer.minimize(loss = loss, global_step = global_step)
@@ -88,7 +88,6 @@ def eval(model_path, min_Iou = 0.5, yolo_weights = None):
     ------------
         计算模型在coco验证集上的MAP, 用于评价模型
     """
-    val_bboxes = []
     ground_truth = {}
     class_pred = defaultdict(list)
     gt_counter_per_class = defaultdict(int)
@@ -108,10 +107,11 @@ def eval(model_path, min_Iou = 0.5, yolo_weights = None):
             saver = tf.train.Saver()
             saver.restore(sess, model_path)
         for index in range(len(image_files)):
+            val_bboxes = []
             image_file = image_files[index]
             file_id = os.path.split(image_file)[-1].split('.')[0]
             for bbox in bboxes_data[index]:
-                top, left, bottom, right, class_id = bbox[0], bbox[1], bbox[2], bbox[3], bbox[4]
+                left, top, right, bottom, class_id = bbox[0], bbox[1], bbox[2], bbox[3], bbox[4]
                 class_name = val_Reader.class_names[int(class_id)]
                 bbox = [float(left), float(top), float(right), float(bottom)]
                 val_bboxes.append({"class_name" : class_name, "bbox": bbox, "used": False})
@@ -189,10 +189,10 @@ def eval(model_path, min_Iou = 0.5, yolo_weights = None):
         for idx, val in enumerate(tp):
             tp[idx] += sum_class
             sum_class += val
-        rec = [0.0] * len(tp)
+        rec = tp[:]
         for idx, val in enumerate(tp):
             rec[idx] = tp[idx] / gt_counter_per_class[class_name]
-        prec = [0.0] * len(tp)
+        prec = tp[:]
         for idx, val in enumerate(tp):
             prec[idx] = tp[idx] / (fp[idx] + tp[idx])
 

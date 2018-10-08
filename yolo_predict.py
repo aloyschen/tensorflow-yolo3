@@ -193,7 +193,7 @@ class yolo_predictor:
         # 这里构建13*13*1*2的矩阵，对应每个格子加上对应的坐标
         grid_y = tf.tile(tf.reshape(tf.range(grid_size[0]), [-1, 1, 1, 1]), [1, grid_size[1], 1, 1])
         grid_x = tf.tile(tf.reshape(tf.range(grid_size[1]), [1, -1, 1, 1]), [grid_size[0], 1, 1, 1])
-        grid = tf.concat([grid_x, grid_y], axis=-1)
+        grid = tf.concat([grid_x, grid_y], axis = -1)
         grid = tf.cast(grid, tf.float32)
         # 将x,y坐标归一化为占416的比例
         box_xy = (tf.sigmoid(predictions[..., :2]) + grid) / tf.cast(grid_size[::-1], tf.float32)

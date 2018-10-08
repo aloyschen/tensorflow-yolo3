@@ -106,10 +106,9 @@ def draw_box(image, bbox):
     xmin, ymin, xmax, ymax, label = tf.split(value = bbox, num_or_size_splits = 5, axis=2)
     height = tf.cast(tf.shape(image)[1], tf.float32)
     weight = tf.cast(tf.shape(image)[2], tf.float32)
-    bbox = tf.concat([ymin / height, xmin / weight, ymax / height, xmax / weight], 2)
-    image = tf.image.draw_bounding_boxes(image, bbox)
-    tf.summary.image('input', image)
-    return image
+    new_bbox = tf.concat([tf.cast(ymin, tf.float32) / height, tf.cast(xmin, tf.float32) / weight, tf.cast(ymax, tf.float32) / height, tf.cast(xmax, tf.float32) / weight], 2)
+    new_image = tf.image.draw_bounding_boxes(image, new_bbox)
+    tf.summary.image('input', new_image)
 
 
 def voc_ap(rec, prec):

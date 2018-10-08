@@ -206,9 +206,3 @@ if __name__ == "__main__":
     # 计算模型的Map
     # eval(config.model_dir, yolo_weights = config.yolo3_weights_path)
 
-
-
-
-
-
-

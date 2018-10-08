@@ -103,9 +103,6 @@ class yolo:
         -------
             conv: 卷积之后的feature map
         """
-        if strides > 1:
-            # 在输入feature map的长宽维度进行padding
-            inputs = tf.pad(inputs, paddings = [[0, 0], [1, 0], [1, 0], [0, 0]], mode = 'CONSTANT')
         conv = tf.layers.conv2d(
             inputs = inputs, filters = filters_num,
             kernel_size = kernel_size, strides = [strides, strides], kernel_initializer = tf.glorot_uniform_initializer(),
@@ -132,7 +129,8 @@ class yolo:
         -------
             inputs: 经过残差网络处理后的结果
         """
-
+        # 在输入feature map的长宽维度进行padding
+        inputs = tf.pad(inputs, paddings=[[0, 0], [1, 0], [1, 0], [0, 0]], mode='CONSTANT')
         layer = self._conv2d_layer(inputs, filters_num, kernel_size = 3, strides = 2, name = "conv2d_" + str(conv_index))
         layer = self._batch_normalization_layer(layer, name = "batch_normalization_" + str(conv_index), training = training, norm_decay = norm_decay, norm_epsilon = norm_epsilon)
         conv_index += 1
@@ -239,15 +237,15 @@ class yolo:
             training: 是否为训练模式
         """
         conv_index = 1
-        conv2d_26, conv2d_45, conv, conv_index = self._darknet53(inputs, conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
+        conv2d_26, conv2d_43, conv, conv_index = self._darknet53(inputs, conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
         with tf.variable_scope('yolo'):
             conv2d_57, conv2d_59, conv_index = self._yolo_block(conv, 512, num_anchors * (num_classes + 5), conv_index = conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv2d_60 = self._conv2d_layer(conv2d_57, filters_num = 256, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
             conv2d_60 = self._batch_normalization_layer(conv2d_60, name = "batch_normalization_" + str(conv_index),training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv_index += 1
             unSample_0 = tf.image.resize_nearest_neighbor(conv2d_60, [2 * tf.shape(conv2d_60)[1], 2 * tf.shape(conv2d_60)[1]], name='upSample_0')
-            route0 = tf.concat([unSample_0, conv2d_45], axis = -1, name = 'route_0')
-            conv2d_65, conv2d_67, conv_index = self._yolo_block(route0, 256, num_anchors * (num_classes + 5), conv_index = conv_index, training = training,norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
+            route0 = tf.concat([unSample_0, conv2d_43], axis = -1, name = 'route_0')
+            conv2d_65, conv2d_67, conv_index = self._yolo_block(route0, 256, num_anchors * (num_classes + 5), conv_index = conv_index, training = training, norm_decay = self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv2d_68 = self._conv2d_layer(conv2d_65, filters_num = 128, kernel_size = 1, strides = 1, name = "conv2d_" + str(conv_index))
             conv2d_68 = self._batch_normalization_layer(conv2d_68, name = "batch_normalization_" + str(conv_index), training=training, norm_decay=self.norm_decay, norm_epsilon = self.norm_epsilon)
             conv_index += 1

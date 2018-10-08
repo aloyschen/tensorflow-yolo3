@@ -6,7 +6,7 @@ import numpy as np
 from collections import defaultdict
 
 class Reader:
-    def __init__(self, mode, data_dir, anchors_path, num_classes, tfrecord_num = 1, input_shape = 416, max_boxes = 20):
+    def __init__(self, mode, data_dir, anchors_path, num_classes, tfrecord_num = 12, input_shape = 416, max_boxes = 20):
         """
         Introduction
         ------------
@@ -320,8 +320,7 @@ class Reader:
         dataset = tf.data.TFRecordDataset(filenames = self.TfrecordFile)
         dataset = dataset.map(self.parser, num_parallel_calls = 10)
         if self.mode == 'train':
-            dataset = dataset.apply(tf.contrib.data.shuffle_and_repeat(100))
-            dataset = dataset.batch(batch_size).prefetch(batch_size)
+            dataset = dataset.repeat().shuffle(9000).batch(batch_size).prefetch(batch_size)
         else:
             dataset = dataset.repeat().batch(batch_size).prefetch(batch_size)
         return dataset

@@ -261,7 +261,7 @@ class yolo:
         """
         Introduction
         ------------
-            根据不同大小的feature map做多尺度的检测，三种feature map大小分别为13x13x1024, 26x26x512, 52x52x256
+            根据不同大小的feature map做多尺度的检测，三种feature map大小分别为13x13x255, 26x26x255, 52x52x255
         Parameters
         ----------
             feats: 输入的特征feature map
